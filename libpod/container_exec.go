@@ -315,7 +315,17 @@ func (c *Container) ExecStartAndAttach(sessionID string, streams *define.AttachS
 		return err
 	}
 
-	c.newContainerEvent(events.Exec)
+	if c.HasHealthCheck() {
+		//healthStatus, err := c.HealthCheckStatus()
+		//if err != nil {
+		//return err
+		//}
+		//c.newContainerHealthEvent(healthStatus)
+		c.newContainerEvent(events.HealthStatus)
+	} else {
+		c.newContainerEvent(events.Exec)
+	}
+
 	logrus.Debugf("Successfully started exec session %s in container %s", session.ID(), c.ID())
 
 	var lastErr error

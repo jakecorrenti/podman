@@ -20,6 +20,24 @@ func (r *Runtime) newEventer() (events.Eventer, error) {
 	return events.NewEventer(options)
 }
 
+func (c *Container) newContainerHealthEvent(status string) {
+	e := events.NewEvent(events.HealthStatus)
+	e.ID = c.ID()
+	e.Name = c.Name()
+	e.Image = c.config.RootfsImageName
+	e.Type = events.Container
+
+	e.Details = events.Details{
+		ID:         e.ID,
+		Attributes: c.Labels(),
+	}
+
+	if err := c.runtime.eventer.Write(e); err != nil {
+		logrus.Errorf("Unable to write health check event: %q", err)
+	}
+
+}
+
 // newContainerEvent creates a new event based on a container
 func (c *Container) newContainerEvent(status events.Status) {
 	e := events.NewEvent(status)
@@ -32,6 +50,15 @@ func (c *Container) newContainerEvent(status events.Status) {
 		ID:         e.ID,
 		Attributes: c.Labels(),
 	}
+
+	//if status.String() == events.HealthStatus.String() {
+	//healthCheckStatus, err := c.HealthCheckStatus()
+	//if err != nil {
+	//healthCheckStatus = "err retrieving health status"
+	//}
+
+	//e.Details.HealthStatus = healthCheckStatus
+	//}
 
 	if err := c.runtime.eventer.Write(e); err != nil {
 		logrus.Errorf("Unable to write pod event: %q", err)

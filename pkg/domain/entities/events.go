@@ -45,7 +45,8 @@ func ConvertToLibpodEvent(e Event) *libpodEvents.Event {
 		Time:              time.Unix(0, e.TimeNano),
 		Type:              t,
 		Details: libpodEvents.Details{
-			Attributes: details,
+			Attributes:   details,
+			HealthStatus: e.Actor.HealthStatus,
 		},
 	}
 }
@@ -67,8 +68,9 @@ func ConvertToEntitiesEvent(e libpodEvents.Event) *Event {
 		Type:   e.Type.String(),
 		Action: e.Status.String(),
 		Actor: dockerEvents.Actor{
-			ID:         e.ID,
-			Attributes: attributes,
+			ID:           e.ID,
+			Attributes:   attributes,
+			HealthStatus: e.Details.HealthStatus,
 		},
 		Scope:    "local",
 		Time:     e.Time.Unix(),

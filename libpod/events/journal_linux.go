@@ -58,6 +58,7 @@ func (e EventJournalD) Write(ee Event) error {
 			}
 			m["PODMAN_LABELS"] = string(b)
 		}
+		m["PODMAN_HEALTH_STATUS"] = ee.Details.HealthStatus
 	case Network:
 		m["PODMAN_ID"] = ee.ID
 		m["PODMAN_NETWORK_NAME"] = ee.Network

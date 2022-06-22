@@ -31,8 +31,9 @@ const (
 // The container attributes are its labels, other actors
 // can generate these attributes from other properties.
 type Actor struct {
-	ID         string
-	Attributes map[string]string
+	ID           string
+	Attributes   map[string]string
+	HealthStatus string
 }
 
 // Message represents the information an event contains

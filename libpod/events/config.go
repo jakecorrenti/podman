@@ -51,7 +51,8 @@ type Details struct {
 	ID string
 	// Attributes can be used to describe specifics about the event
 	// in the case of a container event, labels for example
-	Attributes map[string]string
+	Attributes   map[string]string
+	HealthStatus string
 }
 
 // EventerOptions describe options that need to be passed to create
@@ -141,6 +142,8 @@ const (
 	Exited Status = "died"
 	// Export ...
 	Export Status = "export"
+	// HealthStatus ...
+	HealthStatus Status = "health_status"
 	// History ...
 	History Status = "history"
 	// Import ...

@@ -168,6 +168,8 @@ func StringToStatus(name string) (Status, error) {
 		return Exited, nil
 	case Export.String():
 		return Export, nil
+	case HealthStatus.String():
+		return HealthStatus, nil
 	case History.String():
 		return History, nil
 	case Import.String():
