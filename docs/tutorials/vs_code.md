@@ -10,7 +10,53 @@ In this example we will be using the common scenario of using GitHub Pages to ho
 
 For installing or building Podman, please see the [installation instructions](https://podman.io/getting-started/installation).
 
-## Set up your blog source code
+**IMPORTANT**: When installing Visual Studio Code, it is important that you are not using the Flatpak version of the software, as it has limitations that will not allow you to successfully set up development containers.
+
+## Set up Visual Studio Code 
+
+The first step after making sure Podman and Visual Studio Code are installed is to set up your environment. 
+
+### Install Extensions
+
+Install the [Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) and [Docker](https://marketplace.visualstudio.com/items?itemName=ms-azuretools.vscode-docker) extensions in Visual Studio Code.
+
+### Configure Extensions
+- Go to the Dev Containers extension settings
+- Change the Docker Executable path to "podman"
+- Change the Docker Compose path to "podman-compose"
+	- If you do not have podman-compose installed, please see the [installation instructions](https://github.com/containers/podman-compose)
+<br/><br/>
+- Go to the Docker extension settings
+- Change the Docker Path to the absolute path to the Podman binary
+- Add the environment variable DOCKER_HOST with the value: unix:///run/user/1000/podman/podman.sock
+	- this points the extension to the Podman socket where 1000 is your uid
+
+
+## Example: Creating a Blog 
+### Set up your first Development Container
+
+Now that you have your environment set up and your extensions are configured properly, we can start creating development containers. 
+- First, you need to create and/or open the project where you want to set up the development container. 
+- Using the Command Palette in Visual Studio Code, begin typing and select the option "Dev Containers: Add Dev Container Configuration Files..."
+- Select your base image of choice
+- Select any additional features to install inside the container and press "OK"
+	- This will create a `.devcontainer` directory in your workspace that contains a `devcontainer.json` file. This file tells Visual Studio Code how to access or create your development container
+- Next you need to make some modifications to the `devcontainer.json` file that is provided to you by the extension in order to get it working with Podman
+	- if you are running a Linux machine, you need to have the extension mount your workspace with the proper SELinux context. This context is what access control is based off of. You additionally need to map your current uid and gid to the same values in the container by creating a user namespace:
+	``` json
+	// Add the following lines to your devcontainer.json file to mount the workspace with the proper SELinux context
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,Z",
+	"workspaceFolder": "/workspace",
+
+	// Add the following lines to your devcontainer.json file to map your current uid and gid to the container
+	"runArgs": ["--userns=keep-id"],
+	"containerUser": "vscode",
+	```
+- After making those modifications, you can run your first development container! Using the Command Palette in Visual Studio Code, begin typing and select the option "Dev Containers: Rebuild and Reopen in Container"
+	- This will begin setting up your development container
+	- Once the extension is done setting up your container, pull up the terminal and you can interact with the container! Feel free to create files and make changes to them. 
+
+### Set up your blog source code
 
 Create a new directory on your Desktop and add a file inside named `index.md` with these contents:
 
@@ -20,7 +66,7 @@ Create a new directory on your Desktop and add a file inside named `index.md` wi
 Here is my blog about horses.
 ```
 
-## Add devcontainer
+### Add devcontainer
 
 Add a folder inside your project folder named `.devcontainer`. And inside add these files:
 
@@ -54,7 +100,13 @@ Add a folder inside your project folder named `.devcontainer`. And inside add th
 	"postCreateCommand": "sh .devcontainer/post-create.sh",
 
 	// Comment out to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
-	"remoteUser": "vscode"
+	"remoteUser": "vscode",
+
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,Z",
+	"workspaceFolder": "/workspace",
+
+	"runArgs": ["--userns=keep-id"],
+	"containerUser": "vscode"
 }
 ```
 
@@ -98,17 +150,15 @@ fi
 
 NOTE: perhaps these recommended files can be improved and add citation to best practices.
 
-## Set up VS Code
-
-Install VS Code and add the Containers Remote Development extension in the extensions marketplace.
-
-NOTE: :warning: :warning::warning::warning:warning::warning:  :    THIS PART OF THE INSTRUCTIONS NEEDS HELP TO MAKE PODMAN WORK PROPERLY
-
-## Run the container in VS Code
+### Run the container in VS Code
 
 Use VS Code to open your project folder on your desktop.
 
-VS Code should ask you if you want to start up a development container for this project. Click YES and wait for the container to build.
+VS Code should ask you if you want to start up a development container for this project.
+
+> Folder contains a Dev Container configuration file. Reopen folder to develop in a container (learn more).
+
+Click YES and wait for the container to build.
 
 Use COMMAND-~ to open the terminal (which is inside the container) and run this command to serve your blog using Jekyll:
 
@@ -116,7 +166,7 @@ Use COMMAND-~ to open the terminal (which is inside the container) and run this 
 bundle exec jekyll serve
 ```
 
-## Open the blog in your browser
+### Open the blog in your browser
 
 From the previous step, you should see a link for localhost:4000/, click that link.
 
