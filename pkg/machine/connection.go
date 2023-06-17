@@ -12,17 +12,22 @@ import (
 
 const LocalhostIP = "127.0.0.1"
 
+// Identity is the private key that ssh uses to get access to a private server
 func AddConnection(uri fmt.Stringer, name, identity string, isDefault bool) error {
 	if len(identity) < 1 {
 		return errors.New("identity must be defined")
 	}
+    // get the custom virtual machine config file if it exists
 	cfg, err := config.ReadCustomConfig()
 	if err != nil {
 		return err
 	}
+    // Check to see if there is already a remote service that exists with the 
+    // name we are trying to add
 	if _, ok := cfg.Engine.ServiceDestinations[name]; ok {
 		return errors.New("cannot overwrite connection")
 	}
+    // set the new service to be the active service
 	if isDefault {
 		cfg.Engine.ActiveService = name
 	}
@@ -31,6 +36,7 @@ func AddConnection(uri fmt.Stringer, name, identity string, isDefault bool) erro
 		IsMachine: true,
 	}
 	dst.Identity = identity
+    // Check if there are currently no remote services
 	if cfg.Engine.ServiceDestinations == nil {
 		cfg.Engine.ServiceDestinations = map[string]config.Destination{
 			name: dst,
@@ -42,6 +48,7 @@ func AddConnection(uri fmt.Stringer, name, identity string, isDefault bool) erro
 	return cfg.Write()
 }
 
+// Check to see if there are any services that are the default service
 func AnyConnectionDefault(name ...string) (bool, error) {
 	cfg, err := config.ReadCustomConfig()
 	if err != nil {
@@ -73,12 +80,15 @@ func RemoveConnections(names ...string) error {
 		return err
 	}
 	for _, name := range names {
+        // If it exists, delete the service
 		if _, ok := cfg.Engine.ServiceDestinations[name]; ok {
 			delete(cfg.Engine.ServiceDestinations, name)
 		} else {
 			return fmt.Errorf("unable to find connection named %q", name)
 		}
 
+        // if the removed service was the default, set a random service as the 
+        // new default
 		if cfg.Engine.ActiveService == name {
 			cfg.Engine.ActiveService = ""
 			for service := range cfg.Engine.ServiceDestinations {

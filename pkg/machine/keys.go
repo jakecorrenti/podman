@@ -30,9 +30,11 @@ func CreateSSHKeys(writeLocation string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+    // Returns the SSH key
 	return strings.TrimSuffix(string(b), "\n"), nil
 }
 
+// Only used in WSL
 func CreateSSHKeysPrefix(identityPath string, passThru bool, skipExisting bool, prefix ...string) (string, error) {
 	_, e := os.Stat(identityPath)
 	if !skipExisting || errors.Is(e, os.ErrNotExist) {
@@ -42,6 +44,7 @@ func CreateSSHKeysPrefix(identityPath string, passThru bool, skipExisting bool, 
 	} else {
 		fmt.Println("Keys already exist, reusing")
 	}
+    // This lower half can be extracted for reuse by other functions
 	b, err := os.ReadFile(identityPath + ".pub")
 	if err != nil {
 		return "", err
@@ -51,6 +54,7 @@ func CreateSSHKeysPrefix(identityPath string, passThru bool, skipExisting bool, 
 
 // generatekeys creates an ed25519 set of keys
 func generatekeys(writeLocation string) error {
+    // add the write location to the end of the ssh command above
 	args := append(append([]string{}, sshCommand[1:]...), writeLocation)
 	cmd := exec.Command(sshCommand[0], args...)
 	stdErr, err := cmd.StderrPipe()
@@ -64,6 +68,8 @@ func generatekeys(writeLocation string) error {
 	if waitErr == nil {
 		return nil
 	}
+    // If generating the keys is a success, we never get to this point. This point
+    // further is identifying where the error occurred
 	errMsg, err := io.ReadAll(stdErr)
 	if err != nil {
 		return fmt.Errorf("key generation failed, unable to read from stderr: %w", waitErr)
@@ -72,6 +78,7 @@ func generatekeys(writeLocation string) error {
 }
 
 // generatekeys creates an ed25519 set of keys
+// Only used in WSL implementation
 func generatekeysPrefix(identityPath string, passThru bool, prefix ...string) error {
 	dir := filepath.Dir(identityPath)
 	file := filepath.Base(identityPath)
@@ -88,6 +95,9 @@ func generatekeysPrefix(identityPath string, passThru bool, prefix ...string) er
 	if err != nil {
 		return err
 	}
+    // could do a check like `if strings.Contains(prefix[0], "/")`, because
+    // if the prefix doesn't contain a slash, it will return an absolute path
+    // and this following call would be unnecessary
 	binary, err = filepath.Abs(binary)
 	if err != nil {
 		return err

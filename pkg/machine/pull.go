@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"github.com/vbauerster/mpb/v8"
 	"io"
 	"net/http"
 	url2 "net/url"
@@ -22,7 +23,6 @@ import (
 	"github.com/containers/storage/pkg/archive"
 	"github.com/sirupsen/logrus"
 	"github.com/ulikunitz/xz"
-	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
 )
 
@@ -37,10 +37,12 @@ func NewGenericDownloader(vmType VMType, vmName, pullPath string) (DistributionD
 	var (
 		imageName string
 	)
+	// Get the directory where images are stored
 	dataDir, err := GetDataDir(vmType)
 	if err != nil {
 		return nil, err
 	}
+	// Get the directory where images are cached after they're pulled
 	cacheDir, err := GetCacheDir(vmType)
 	if err != nil {
 		return nil, err
@@ -89,6 +91,7 @@ func supportedURL(path string) (url *url2.URL) {
 
 func (d Download) GetLocalUncompressedFile(dataDir string) string {
 	compressedFilename := d.VMName + "_" + d.ImageName
+	// Determine the type of compression the file is using
 	extension := compressionFromFile(compressedFilename)
 	uncompressedFile := strings.TrimSuffix(compressedFilename, fmt.Sprintf(".%s", extension.String()))
 	d.LocalUncompressedFile = filepath.Join(dataDir, uncompressedFile)
@@ -139,6 +142,7 @@ func DownloadImage(d DistributionDownload) error {
 // DownloadVMImage downloads a VM image from url to given path
 // with download status
 func DownloadVMImage(downloadURL *url2.URL, imageName string, localImagePath string) error {
+    // create the image file
 	out, err := os.Create(localImagePath)
 	if err != nil {
 		return err
@@ -149,6 +153,7 @@ func DownloadVMImage(downloadURL *url2.URL, imageName string, localImagePath str
 		}
 	}()
 
+    // Download the image from the url 
 	resp, err := http.Get(downloadURL.String())
 	if err != nil {
 		return err
@@ -171,6 +176,7 @@ func DownloadVMImage(downloadURL *url2.URL, imageName string, localImagePath str
 		mpb.WithRefreshRate(180*time.Millisecond),
 	)
 
+    // sets up the progress bar that shows when the image is being downloaded
 	bar := p.AddBar(size,
 		mpb.BarFillerClearOnComplete(),
 		mpb.PrependDecorators(
@@ -188,6 +194,8 @@ func DownloadVMImage(downloadURL *url2.URL, imageName string, localImagePath str
 		}
 	}()
 
+    // copy the contents of the downloaded image to the path where it should be
+    // located for podman
 	if _, err := io.Copy(out, proxyReader); err != nil {
 		return err
 	}
@@ -264,6 +272,8 @@ func decompressXZ(src string, output io.WriteCloser) error {
 	if cmd != nil {
 		return cmd.Run()
 	}
+    // go channels are confusing. is this basically not having us return nil 
+    // until the channel receives the value `true`?
 	<-done
 	return nil
 }

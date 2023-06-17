@@ -17,6 +17,7 @@ const (
 	defaultVFKitEndpoint = "http://localhost:8081"
 )
 
+// This is duplicated for each virtualization interface
 type Virtualization struct {
 	artifact    machine.Artifact
 	compression machine.ImageCompression
@@ -34,6 +35,7 @@ func (v Virtualization) Artifact() machine.Artifact {
 	return machine.Metal
 }
 
+// Check to see if there is already an active virtual machine on the system
 func (v Virtualization) CheckExclusiveActiveVM() (bool, string, error) {
 	fsVms, err := getVMInfos()
 	if err != nil {
@@ -56,12 +58,17 @@ func (v Virtualization) Format() machine.ImageFormat {
 	return v.format
 }
 
+// Try and load the specified virtual machine's JSON configuration from the
+// configuration directory. If this succeeds, then we have a valid name.
 func (v Virtualization) IsValidVMName(name string) (bool, error) {
 	mm := MacMachine{Name: name}
+	// Get the directory where config files are located
 	configDir, err := machine.GetConfDir(machine.AppleHvVirt)
 	if err != nil {
 		return false, err
 	}
+	// Check to see if can successfully load the machine from the configuration file.
+	// If it can be loaded, we have a valid machine name, otherwise we do not.
 	if err := loadMacMachineFromJSON(configDir, &mm); err != nil {
 		return false, err
 	}
@@ -73,15 +80,24 @@ func (v Virtualization) List(opts machine.ListOptions) ([]*machine.ListResponse,
 		response []*machine.ListResponse
 	)
 
+	// Load the machine from the local configuration file in the configuration
+	// directory. The naming of this function is confusing when compared to
+	// `loadMacMachineFromJSON`. My first thought was this was loading a single
+	// virtual machine from the config file, not getting the list of all mac
+	// machines. Granted the context of this gives the correct answer away, but
+	// the name of the function alone feels a little misleading.
 	mms, err := v.loadFromLocalJson()
 	if err != nil {
 		return nil, err
 	}
 
 	for _, mm := range mms {
+        // use vfkit to get the virtual machine's state
 		vmState, err := mm.state()
 		if err != nil {
 			if errors.Is(err, unix.ECONNREFUSED) {
+                // if the vfkit service is not responding, assume the service is
+                // not running
 				vmState = machine.Stopped
 			} else {
 				return nil, err
@@ -109,6 +125,8 @@ func (v Virtualization) List(opts machine.ListOptions) ([]*machine.ListResponse,
 }
 
 func (v Virtualization) LoadVMByName(name string) (machine.VM, error) {
+    // need to create a new instance of a machine with just the name because the
+    // name is needed to locate the JSON configuration file
 	m := MacMachine{Name: name}
 	return m.loadFromFile()
 }
@@ -121,12 +139,14 @@ func (v Virtualization) NewMachine(opts machine.InitOptions) (machine.VM, error)
 		return nil, err
 	}
 
+    // Create a new JSON config file for the machine
 	configPath, err := machine.NewMachineFile(getVMConfigPath(configDir, opts.Name), nil)
 	if err != nil {
 		return nil, err
 	}
 	m.ConfigPath = *configPath
 
+    // Create a new Ignition config file for the machine
 	ignitionPath, err := machine.NewMachineFile(filepath.Join(configDir, m.Name)+".ign", nil)
 	if err != nil {
 		return nil, err
@@ -143,6 +163,7 @@ func (v Virtualization) NewMachine(opts machine.InitOptions) (machine.VM, error)
 		Memory: opts.Memory,
 	}
 
+    // Marshals the machine instance and writes it to the config file
 	if err := m.writeConfig(); err != nil {
 		return nil, err
 	}
@@ -167,6 +188,7 @@ func (v Virtualization) loadFromLocalJson() ([]*MacMachine, error) {
 	if err != nil {
 		return nil, err
 	}
+    // Gather the list of all virtual machine JSON configuration files
 	if err := filepath.WalkDir(configDir, func(input string, d fs.DirEntry, e error) error {
 		if e != nil {
 			return e
@@ -179,6 +201,8 @@ func (v Virtualization) loadFromLocalJson() ([]*MacMachine, error) {
 		return nil, err
 	}
 
+    // Iterate through the virtual machine JSON configuration files and load
+    // each instance to eventually get returned
 	for _, jsonFile := range jsonFiles {
 		mm := MacMachine{}
 		if err := loadMacMachineFromJSON(jsonFile, &mm); err != nil {

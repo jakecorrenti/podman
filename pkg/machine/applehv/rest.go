@@ -104,6 +104,8 @@ func (vf *VfkitHelper) stop(force, wait bool) error {
 	// Backoff to wait on the machine shutdown
 	for i := 0; i < 11; i++ {
 		_, err := vf.getRawState()
+        // If the service fails to connect to the virtual machine, it has 
+        // successfully stopped and we can stop the wait
 		if err != nil || errors.Is(err, unix.ECONNREFUSED) {
 			waitErr = nil
 			break

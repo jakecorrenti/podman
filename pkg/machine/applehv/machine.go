@@ -27,6 +27,7 @@ var (
 	vmtype = machine.AppleHvVirt
 )
 
+// Why isn't this in applehv/config.go where the Virtualization type is defined?
 func GetVirtualizationProvider() machine.VirtProvider {
 	return &Virtualization{
 		artifact:    machine.None,
@@ -81,18 +82,34 @@ func (m *MacMachine) Init(opts machine.InitOptions) (bool, error) {
 	var (
 		key string
 	)
+	// Get the path to the directory where vm images are located
 	dataDir, err := machine.GetDataDir(machine.AppleHvVirt)
 	if err != nil {
 		return false, err
 	}
 	// Acquire the image
+	// NOTE: I don't really understand what is going on in this switch statement.
+	// What purpose do the FCOS streams play? Is the default case what happens
+	// when the user doesn't have the image already downloaded?
 	switch opts.ImagePath {
+	// Check FCOS (Fedora CoreOS) stream type
+	// Testing -- content in this stream is updated regularly
+	// Next    -- often used to experiment with new features and to test out
+	//            rebases on top opf the next major Fedora version. Content
+	//            will eventually filter down into `Testing` and `Stable`
+	// Stable  -- most reliable stream with changes only reaching that
+	//            stream after spending time in the `Testing` stream
 	case machine.Testing.String(), machine.Next.String(), machine.Stable.String(), "":
+		// This is used when the user has already pulled the image, and is
+		// providing it to podman. Creates a DistributedDownload instance which
+		// represents the information that describes the virtual machine image
 		g, err := machine.NewGenericDownloader(machine.HyperVVirt, opts.Name, opts.ImagePath)
 		if err != nil {
 			return false, err
 		}
 
+		// Create a VMFile instance that points to the uncompressed virtual
+		// machine image
 		imagePath, err := machine.NewMachineFile(g.Get().GetLocalUncompressedFile(dataDir), nil)
 		if err != nil {
 			return false, err
@@ -106,11 +123,15 @@ func (m *MacMachine) Init(opts machine.InitOptions) (bool, error) {
 		if err != nil {
 			return false, err
 		}
+		// Create a new virtual machine file that represents an uncompressed version
+		// of the virtual machine image
 		imagePath, err := machine.NewMachineFile(g.Get().LocalUncompressedFile, nil)
 		if err != nil {
 			return false, err
 		}
 		m.ImagePath = *imagePath
+		// Download the image from the URL and decompress it at the image's
+		// local path
 		if err := machine.DownloadImage(g); err != nil {
 			return false, err
 		}
@@ -123,6 +144,7 @@ func (m *MacMachine) Init(opts machine.InitOptions) (bool, error) {
 	}
 	m.VfkitHelper = *vfhelper
 
+	// Get the .ssh directory path
 	m.IdentityPath = util.GetIdentityPath(m.Name)
 	m.Rootful = opts.Rootful
 	m.RemoteUsername = opts.Username
@@ -137,6 +159,13 @@ func (m *MacMachine) Init(opts machine.InitOptions) (bool, error) {
 	//}
 	m.Port = 22
 
+	// Ignition is the utility used by Fedora CoreOS and RHEL CoreOS to
+	// manipulate disks during the initramfs. This includes partitioning disks,
+	// formatting partitions, writing files (regular files, systemd units, etc.),
+	// and configuring users. On first boot, Ignition reads its configuration
+	// from a source of truth (remote URL, network metadata service, hypervisor
+	// bridge, etc.) and applies the configuration
+	// NOTE: need to re-look at this. not too sure what is oging on.
 	if len(opts.IgnitionPath) < 1 {
 		// TODO localhost needs to be restored here
 		uri := machine.SSHRemoteConnection.MakeSSHURL("192.168.64.2", fmt.Sprintf("/run/user/%d/podman/podman.sock", m.UID), strconv.Itoa(m.Port), m.RemoteUsername)
@@ -163,18 +192,23 @@ func (m *MacMachine) Init(opts machine.InitOptions) (bool, error) {
 
 	// TODO resize disk
 
+	// Write the virtual machine config to the JSON config file
 	if err := m.writeConfig(); err != nil {
 		return false, err
 	}
 
 	if len(opts.IgnitionPath) < 1 {
 		var err error
+		// make public and private ssh keys for interacting with the virtual machine
 		key, err = machine.CreateSSHKeys(m.IdentityPath)
 		if err != nil {
 			return false, err
 		}
 	}
 
+	// If the user provided an ignition file, read and apply the configuration
+	// NOTE: This conditional check could have been put before the one above,
+	// and then the one above could have just been executed without the conditional
 	if len(opts.IgnitionPath) > 0 {
 		inputIgnition, err := os.ReadFile(opts.IgnitionPath)
 		if err != nil {
@@ -195,6 +229,7 @@ func (m *MacMachine) Init(opts machine.InitOptions) (bool, error) {
 		Rootful:   m.Rootful,
 	}
 
+	// Generate and write the ignition file
 	if err := ign.GenerateIgnitionConfig(); err != nil {
 		return false, err
 	}
@@ -206,6 +241,7 @@ func (m *MacMachine) Init(opts machine.InitOptions) (bool, error) {
 }
 
 func (m *MacMachine) Inspect() (*machine.InspectInfo, error) {
+	// Get the state of the current virtual machine
 	vmState, err := m.state()
 	if err != nil {
 		return nil, err
@@ -248,6 +284,8 @@ func (m *MacMachine) Remove(name string, opts machine.RemoveOptions) (string, fu
 		if !opts.Force {
 			return "", nil, fmt.Errorf("invalid state: %s is running", m.Name)
 		}
+		// If the user wants to force remove the virtual machine, it needs to
+		// be stopped first
 		if err := m.stop(true, true); err != nil {
 			return "", nil, err
 		}
@@ -267,17 +305,21 @@ func (m *MacMachine) Remove(name string, opts machine.RemoveOptions) (string, fu
 	files = append(files, m.ConfigPath.GetPath())
 
 	confirmationMessage := "\nThe following files will be deleted:\n\n"
+	// List the files that are going to be deleted by removing the virtual machine
 	for _, msg := range files {
 		confirmationMessage += msg + "\n"
 	}
 
 	confirmationMessage += "\n"
 	return confirmationMessage, func() error {
+		// Remove the files the user didn't specify they wanted to keep
 		for _, f := range files {
 			if err := os.Remove(f); err != nil && !errors.Is(err, os.ErrNotExist) {
 				logrus.Error(err)
 			}
 		}
+		// NOTE: this is a variadic function, why not just pass m.Name and
+		// (m.Name + "-root") to `machine.RemoveConnections()?
 		if err := machine.RemoveConnections(m.Name); err != nil {
 			logrus.Error(err)
 		}
@@ -301,6 +343,8 @@ func (m *MacMachine) Remove(name string, opts machine.RemoveOptions) (string, fu
 	}, nil
 }
 
+// Marshal the machine instance into a JSON string and write that string to the
+// JSON virtual machine config file
 func (m *MacMachine) writeConfig() error {
 	b, err := json.MarshalIndent(m, "", " ")
 	if err != nil {
@@ -309,21 +353,26 @@ func (m *MacMachine) writeConfig() error {
 	return os.WriteFile(m.ConfigPath.Path, b, 0644)
 }
 
+// What is the reasoning behind the return type?
 func (m *MacMachine) Set(name string, opts machine.SetOptions) ([]error, error) {
 	var setErrors []error
 	vmState, err := m.State(false)
 	if err != nil {
 		return nil, err
 	}
+	// Cannot set any virtual machine settings to a non-running machine
 	if vmState != machine.Stopped {
 		return nil, machine.ErrWrongState
 	}
+	// Check if user wants to change number of CPUs
 	if cpus := opts.CPUs; cpus != nil {
 		m.CPUs = *cpus
 	}
+	// Check if user wants to change amount of memory
 	if mem := opts.Memory; mem != nil {
 		m.Memory = *mem
 	}
+	// Check if user wants to expand the disk size of the virtual machine
 	if newSize := opts.DiskSize; newSize != nil {
 		if *newSize < m.DiskSize {
 			setErrors = append(setErrors, errors.New("new disk size smaller than existing disk size: cannot shrink disk size"))
@@ -352,6 +401,7 @@ func (m *MacMachine) SSH(name string, opts machine.SSHOptions) error {
 	if err != nil {
 		return err
 	}
+	// Can only ssh into running virtual machine
 	if st != machine.Running {
 		return fmt.Errorf("vm %q is not running", m.Name)
 	}
@@ -383,6 +433,7 @@ func (m *MacMachine) Start(name string, opts machine.StartOptions) error {
 	return m.VfkitHelper.startVfkit(m)
 }
 
+// NOTE: can we get rid of the parameter? completely unused. API compat?
 func (m *MacMachine) State(_ bool) (machine.Status, error) {
 	vmStatus, err := m.VfkitHelper.state()
 	if err != nil {
@@ -407,11 +458,15 @@ func (m *MacMachine) Stop(name string, opts machine.StopOptions) error {
 func getVMConfigPath(configDir, vmName string) string {
 	return filepath.Join(configDir, fmt.Sprintf("%s.json", vmName))
 }
+
 func (m *MacMachine) loadFromFile() (*MacMachine, error) {
+	// Is this possible? not passing a name resorts to podman-machine-default
+	// and you can't change the name using set
 	if len(m.Name) < 1 {
 		return nil, errors.New("encountered machine with no name")
 	}
 
+	// Get the path to the virtual machine's JSON configuration file
 	jsonPath, err := m.jsonConfigPath()
 	if err != nil {
 		return nil, err
@@ -422,9 +477,10 @@ func (m *MacMachine) loadFromFile() (*MacMachine, error) {
 		return nil, err
 	}
 	return &mm, nil
-
 }
 
+// Read the JSON config file and Unmarshal it, putting the contents into the
+// MacMachine instance passed in
 func loadMacMachineFromJSON(fqConfigPath string, macMachine *MacMachine) error {
 	b, err := os.ReadFile(fqConfigPath)
 	if err != nil {
@@ -452,6 +508,8 @@ func getVMInfos() ([]*machine.ListResponse, error) {
 
 	var listed []*machine.ListResponse
 
+	// Iterate through each of the files in the virtual machine's configuration
+	// file directory
 	if err = filepath.WalkDir(vmConfigDir, func(path string, d fs.DirEntry, err error) error {
 		vm := new(MacMachine)
 		if strings.HasSuffix(d.Name(), ".json") {
@@ -460,6 +518,7 @@ func getVMInfos() ([]*machine.ListResponse, error) {
 			if err != nil {
 				return err
 			}
+			// put contents of the config file into the virtual machine instance
 			err = json.Unmarshal(b, vm)
 			if err != nil {
 				return err
@@ -511,16 +570,22 @@ func getVMInfos() ([]*machine.ListResponse, error) {
 	return listed, err
 }
 
+// Currently unused since networking hasn't been figured out for applehv yet
 func (m *MacMachine) startHostNetworking() (string, machine.APIForwardingState, error) {
 	var (
 		forwardSock string
 		state       machine.APIForwardingState
 	)
+	// Get the default contents for a configuration file
 	cfg, err := config.Default()
 	if err != nil {
 		return "", machine.NoForwarding, err
 	}
 
+	// attributes that will be applied to a new process
+	// NOTE: the following lines are also in vfkit.go, which means this could
+	// probably get pulled out to a shared function to make this function
+	// easier to read
 	attr := new(os.ProcAttr)
 	dnr, err := os.OpenFile(os.DevNull, os.O_RDONLY, 0755)
 	if err != nil {
@@ -547,6 +612,8 @@ func (m *MacMachine) startHostNetworking() (string, machine.APIForwardingState, 
 		return "", 0, err
 	}
 
+    // why are we putting the write only DevNull device in the attribute files
+    // twice?
 	attr.Files = []*os.File{dnr, dnw, dnw}
 	cmd := []string{gvproxy}
 	// Add the ssh port
@@ -589,7 +656,11 @@ func AppleHVSSH(username, identityPath, name string, sshPort int, inputArgs []st
 
 	return cmd.Run()
 }
+
+// Return the command that can be run to send something from the virtual 
+// machine's socket to the podman socket on the local machine?
 func (m *MacMachine) setupAPIForwarding(cmd []string) ([]string, string, machine.APIForwardingState) {
+    // path to the virtual machine's podman socket 
 	socket, err := m.forwardSocketPath()
 	if err != nil {
 		return cmd, "", machine.NoForwarding
@@ -611,6 +682,8 @@ func (m *MacMachine) setupAPIForwarding(cmd []string) ([]string, string, machine
 	return cmd, "", machine.MachineLocal
 }
 
+// This function and the `forwardSocketPath` functions have the same functionality, 
+// the return type is just different (string vs. machine.VMFile)
 func (m *MacMachine) dockerSock() (string, error) {
 	dd, err := machine.GetDataDir(machine.AppleHvVirt)
 	if err != nil {
