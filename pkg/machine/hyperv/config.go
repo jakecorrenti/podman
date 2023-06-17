@@ -17,6 +17,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// Like the ones in pkg/machine/applehv and pkg/machine/qemu, this can be extracted
+// as its just an identical duplicate of the others
 type Virtualization struct {
 	artifact    machine.Artifact
 	compression machine.ImageCompression

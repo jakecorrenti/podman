@@ -89,6 +89,9 @@ type Monitorv1 struct {
 	Timeout time.Duration
 }
 
+// QMP (QEMU Machine Protocol) is a JSON-based protocol that allows users to
+// query and configure QEMU instances. QEMU Monitor is used to give complex 
+// commands to the QEMU emulator
 type Monitor struct {
 	//	Address portion of the qmp monitor (/tmp/tmp.sock)
 	Address machine.VMFile

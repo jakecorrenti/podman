@@ -18,6 +18,10 @@ func GetProcessState(pid int) (active bool, exitCode int) {
 
 	var code uint32
 	syscall.GetExitCodeProcess(handle, &code)
+    // 259 means still active. The return value gives this number context, but
+    // I think that it would be worthwhile to make it a constant so its easier to
+    // read and doesn't require me to look at the return value to know what it
+    // means
 	return code == 259, int(code)
 }
 

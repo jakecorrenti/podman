@@ -64,6 +64,8 @@ type DynamicIgnition struct {
 	Rootful   bool
 }
 
+// We have similar functions for virtual machine config files. This could 
+// definitely be stripped out to a shared function
 func (ign *DynamicIgnition) Write() error {
 	b, err := json.Marshal(ign.Cfg)
 	if err != nil {
@@ -73,10 +75,12 @@ func (ign *DynamicIgnition) Write() error {
 }
 
 // GenerateIgnitionConfig
+// This function is confusing me
 func (ign *DynamicIgnition) GenerateIgnitionConfig() error {
 	if len(ign.Name) < 1 {
 		ign.Name = DefaultIgnitionUserName
 	}
+    // Is there a way to not have this hardcoded and have it be dynamic somehow
 	ignVersion := Ignition{
 		Version: "3.2.0",
 	}
@@ -240,6 +244,7 @@ func getDirs(usrName string) []Directory {
 	var (
 		dirs = make([]Directory, len(newDirs))
 	)
+    // Turn the list of directories above and turn them into Directory instances
 	for i, d := range newDirs {
 		newDir := Directory{
 			Node: Node{

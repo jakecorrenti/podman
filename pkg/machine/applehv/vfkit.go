@@ -79,6 +79,8 @@ func (vf *VfkitHelper) startVfkit(m *MacMachine) error {
 	if err != nil {
 		return err
 	}
+    // DevNull is a device on unix systems that discards any data written to it
+    // but reports that the write was successful
 	dnw, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0755)
 	if err != nil {
 		return err
@@ -103,6 +105,7 @@ func (vf *VfkitHelper) startVfkit(m *MacMachine) error {
 	)
 	logrus.Debugf("vfkit cmd: %v", cmdLine)
 	//stderrBuf := &bytes.Buffer{}
+    // So here we are discarding anything that vfkit writes or attempts to read?
 	cmd := &exec.Cmd{
 		Args:   cmdLine,
 		Path:   vf.PathToVfkitBinary,

@@ -108,6 +108,7 @@ type FcosDownload struct {
 }
 
 func NewFcosDownloader(vmType VMType, vmName string, imageStream FCOSStream, vp VirtProvider) (DistributionDownload, error) {
+    // parse fedoraCoreOS's stream and returns the image download URL and the release version
 	info, err := GetFCOSDownload(vp, imageStream)
 	if err != nil {
 		return nil, err
@@ -156,6 +157,8 @@ type FcosDownloadInfo struct {
 	Sha256Sum       string
 }
 
+// Checking to see if there is a cache of the image so that we don't have to do 
+// another pull? Confused about the SHA256 portion.
 func (f FcosDownload) HasUsableCache() (bool, error) {
 	//	 check the sha of the local image if it exists
 	//  get the sha of the remote image
@@ -201,6 +204,8 @@ func GetFcosArch() string {
 // getStreamURL is a wrapper for the fcos.GetStream URL
 // so that we can inject a special stream and url for
 // testing podman before it merges into fcos builds
+// Each stream has a canonical URL representing its current state in JSON format,
+// known as "stream metadata".
 func getStreamURL(streamType FCOSStream) url2.URL {
 	// For the podmanTesting stream type, we point to
 	// a custom url on fedorapeople.org
@@ -222,6 +227,8 @@ func GetFCOSDownload(vp VirtProvider, imageStream FCOSStream) (*FcosDownloadInfo
 		altMeta    release.Release
 	)
 
+    // Get the URL for the stream metadata representing the current state of the
+    // stream
 	streamurl := getStreamURL(imageStream)
 	resp, err := http.Get(streamurl.String())
 	if err != nil {
@@ -237,6 +244,7 @@ func GetFCOSDownload(vp VirtProvider, imageStream FCOSStream) (*FcosDownloadInfo
 		}
 	}()
 	if imageStream == PodmanTesting {
+        // Turn the JSON data into a type that reprsents the stream metadata
 		if err := json.Unmarshal(body, &altMeta); err != nil {
 			return nil, err
 		}
@@ -245,6 +253,7 @@ func GetFCOSDownload(vp VirtProvider, imageStream FCOSStream) (*FcosDownloadInfo
 		if !ok {
 			return nil, fmt.Errorf("unable to pull VM image: no targetArch in stream")
 		}
+        // Try and access the disk file in the fcos stream
 		qcow2, ok := arches.Media.Qemu.Artifacts[Qcow.String()]
 		if !ok {
 			return nil, fmt.Errorf("unable to pull VM image: no qcow2.xz format in stream")
@@ -258,9 +267,14 @@ func GetFCOSDownload(vp VirtProvider, imageStream FCOSStream) (*FcosDownloadInfo
 		}, nil
 	}
 
+    // convert the JSON stream metadata into a Stream instance that containers 
+    // the artifacts that are available in a stream
 	if err := json.Unmarshal(body, &fcosstable); err != nil {
 		return nil, err
 	}
+    // NOTE: don't we do this above already? wouldn't it be the exact same data?
+    // couldn't we just extract it out of that conditional? or are we trying to
+    // prevent unnecessary operations until we need them.
 	arch, ok := fcosstable.Architectures[GetFcosArch()]
 	if !ok {
 		return nil, fmt.Errorf("unable to pull VM image: no targetArch in stream")
