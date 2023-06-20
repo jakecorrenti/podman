@@ -30,6 +30,7 @@ var (
 	vmtype = machine.HyperVVirt
 )
 
+// This is duplicate code from other hypervisor packages
 func GetVirtualizationProvider() machine.VirtProvider {
 	return &Virtualization{
 		artifact:    machine.HyperV,
@@ -48,6 +49,8 @@ const (
 	apiUpTimeout         = 20 * time.Second
 )
 
+// Some of these fields are the same among the different hypervisor types,
+// there could probably be some sort of HypervisorBase shared type or something
 type HyperVMachine struct {
 	// ConfigPath is the fully qualified path to the configuration file
 	ConfigPath machine.VMFile
@@ -75,6 +78,8 @@ type HyperVMachine struct {
 	LastUp time.Time
 }
 
+// This function is gigantic. I think this could be broken up into different functions
+// so that its easier to read
 func (m *HyperVMachine) Init(opts machine.InitOptions) (bool, error) {
 	var (
 		key string
@@ -106,6 +111,10 @@ func (m *HyperVMachine) Init(opts machine.InitOptions) (bool, error) {
 	}
 	m.Port = sshPort
 
+    // The following conditional is implemented the exact same way in 
+    // applehv/machine.go except for the localhost ip addr, which is a different
+    // value
+    // Set up SSH connections
 	if len(opts.IgnitionPath) < 1 {
 		uri := machine.SSHRemoteConnection.MakeSSHURL(machine.LocalhostIP, fmt.Sprintf("/run/user/%d/podman/podman.sock", m.UID), strconv.Itoa(m.Port), m.RemoteUsername)
 		uriRoot := machine.SSHRemoteConnection.MakeSSHURL(machine.LocalhostIP, "/run/podman/podman.sock", strconv.Itoa(m.Port), "root")
@@ -127,6 +136,10 @@ func (m *HyperVMachine) Init(opts machine.InitOptions) (bool, error) {
 	} else {
 		fmt.Println("An ignition path was provided.  No SSH connection was added to Podman")
 	}
+    // Why can't this be put in the conditional above? 
+    // Generate the SSH keys
+    // Why can we do this after we setup the connection? Shouldn't we want to make
+    // the ssh keys first before we add the ssh connections?
 	if len(opts.IgnitionPath) < 1 {
 		var err error
 		key, err = machine.CreateSSHKeys(m.IdentityPath)
@@ -317,6 +330,7 @@ func (m *HyperVMachine) Remove(_ string, opts machine.RemoveOptions) (string, fu
 		return "", nil, err
 	}
 	// In hyperv, they call running 'enabled'
+    // If the virtual machine is running, try and stop it
 	if vm.State() == hypervctl.Enabled {
 		if !opts.Force {
 			return "", nil, hypervctl.ErrMachineStateInvalid
@@ -340,6 +354,7 @@ func (m *HyperVMachine) Remove(_ string, opts machine.RemoveOptions) (string, fu
 	}
 
 	files = append(files, getVMConfigPath(m.ConfigPath.GetPath(), m.Name))
+    // The confirmation message and the deletion of the files can be extracted
 	confirmationMessage := "\nThe following files will be deleted:\n\n"
 	for _, msg := range files {
 		confirmationMessage += msg + "\n"
@@ -384,6 +399,8 @@ func (m *HyperVMachine) Set(name string, opts machine.SetOptions) ([]error, erro
 		return nil, errors.New("unable to change settings unless vm is stopped")
 	}
 
+    // check to make sure the option isn't nil and isn't the same value as the 
+    // current virtual machine's value, and if so, change it
 	if opts.Rootful != nil && m.Rootful != *opts.Rootful {
 		if err := m.setRootful(*opts.Rootful); err != nil {
 			setErrors = append(setErrors, fmt.Errorf("failed to set rootful option: %w", err))
@@ -525,12 +542,14 @@ func (m *HyperVMachine) loadFromFile() (*HyperVMachine, error) {
 	if err != nil {
 		return nil, err
 	}
+    // why mm? feels like that is a copy/paste from the applehv code
 	mm := HyperVMachine{}
 
 	if err := loadMacMachineFromJSON(jsonPath, &mm); err != nil {
 		return nil, err
 	}
 	vmm := hypervctl.NewVirtualMachineManager()
+    // load the virtual machine instatnce and get the vm config
 	vm, err := vmm.GetMachine(m.Name)
 	if err != nil {
 		return nil, err
@@ -562,6 +581,13 @@ func getVMConfigPath(configDir, vmName string) string {
 	return filepath.Join(configDir, fmt.Sprintf("%s.json", vmName))
 }
 
+// This function is just copy/pasted from the mac implementation. needs to be
+// adjusted accordingly.
+// Opens the configuration file and populates the HyperVMachine fields with 
+// what is in the config file
+// Could this be extracted? use the generic interface type for the machine?
+// or does json.Unmarshal need to have the concrete type to be able to unmarshal
+// it?
 func loadMacMachineFromJSON(fqConfigPath string, macMachine *HyperVMachine) error {
 	b, err := os.ReadFile(fqConfigPath)
 	if err != nil {
@@ -578,11 +604,13 @@ func (m *HyperVMachine) startHostNetworking() (string, machine.APIForwardingStat
 		forwardSock string
 		state       machine.APIForwardingState
 	)
+    // default container config
 	cfg, err := config.Default()
 	if err != nil {
 		return "", machine.NoForwarding, err
 	}
 
+    // attributes applied to the process about to be started
 	attr := new(os.ProcAttr)
 	dnr, err := os.OpenFile(os.DevNull, os.O_RDONLY, 0755)
 	if err != nil {
@@ -657,12 +685,21 @@ func (m *HyperVMachine) dockerSock() (string, error) {
 	return filepath.Join(dd, "podman.sock"), nil
 }
 
+// Return the VMFile instance associated with the virtual machine's socket
+// I think that this function could be extracted to be more generic. maybe implement
+// this based on the machine interface rather than the individual hypervisor 
+// implementations. the only thing that differs between them is the param 
+// passed to `machine.GetDataDir`
 func (m *HyperVMachine) forwardSocketPath() (*machine.VMFile, error) {
 	sockName := "podman.sock"
 	path, err := machine.GetDataDir(machine.HyperVVirt)
 	if err != nil {
 		return nil, fmt.Errorf("Resolving data dir: %s", err.Error())
 	}
+    // why can't we do something like 
+    // `return machine.NewMachineFile(dockerSock(), &sockName)` instead of 
+    // everything above? `dockerSock` does the exact same thing, but just returns
+    // a string instead of VMFile instance
 	return machine.NewMachineFile(filepath.Join(path, sockName), &sockName)
 }
 
@@ -687,6 +724,7 @@ func (m *HyperVMachine) writeConfig() error {
 }
 
 func (m *HyperVMachine) setRootful(rootful bool) error {
+    // check to see if any of the params are the default service
 	changeCon, err := machine.AnyConnectionDefault(m.Name, m.Name+"-root")
 	if err != nil {
 		return err

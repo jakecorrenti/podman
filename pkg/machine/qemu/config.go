@@ -14,6 +14,7 @@ type Virtualization struct {
 
 // Deprecated: MachineVMV1 is being deprecated in favor a more flexible and informative
 // structure
+// Is there a timeline for when this can be completely removed?
 type MachineVMV1 struct {
 	// CPUs to be assigned to the VM
 	CPUs uint64
@@ -80,6 +81,9 @@ type MachineVM struct {
 	LastUp time.Time
 }
 
+// Is there a timeline for when this can be removed as well?
+// However, the difference between MonitorV1 and Monitor are quite small,
+// what was the reasoning behind making a Monitorv1 and Monitor separate types?
 type Monitorv1 struct {
 	//	Address portion of the qmp monitor (/tmp/tmp.sock)
 	Address string
@@ -90,7 +94,7 @@ type Monitorv1 struct {
 }
 
 // QMP (QEMU Machine Protocol) is a JSON-based protocol that allows users to
-// query and configure QEMU instances. QEMU Monitor is used to give complex 
+// query and configure QEMU instances. QEMU Monitor is used to give complex
 // commands to the QEMU emulator
 type Monitor struct {
 	//	Address portion of the qmp monitor (/tmp/tmp.sock)

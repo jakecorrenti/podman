@@ -14,6 +14,7 @@ func isProcessAlive(pid int) bool {
 		return true
 	}
 	return false
+	// can be refactored as return checkProcessStatus("process", pid, nil) == nil
 }
 
 func checkProcessStatus(processHint string, pid int, stderrBuf *bytes.Buffer) error {

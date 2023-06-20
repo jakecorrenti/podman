@@ -41,6 +41,7 @@ var (
 	vmtype = machine.QemuVirt
 )
 
+// This is implemented three times identically, this can be extracted to a shared file of some sorts
 func GetVirtualizationProvider() machine.VirtProvider {
 	return &Virtualization{
 		artifact:    machine.Qemu,
@@ -59,7 +60,9 @@ const (
 
 // NewMachine initializes an instance of a virtual machine based on the qemu
 // virtualization.
+// In the other implementations, all implementations of the Virtualization type were located in the config.go file rather than machine.go
 func (p *Virtualization) NewMachine(opts machine.InitOptions) (machine.VM, error) {
+	// path to where the JSON config files are for virtual machines
 	vmConfigDir, err := machine.GetConfDir(vmtype)
 	if err != nil {
 		return nil, err
@@ -68,11 +71,13 @@ func (p *Virtualization) NewMachine(opts machine.InitOptions) (machine.VM, error
 	if len(opts.Name) > 0 {
 		vm.Name = opts.Name
 	}
+	// create VMFile wrapper for ignition file (which can be extracted to a shared function)
 	ignitionFile, err := machine.NewMachineFile(filepath.Join(vmConfigDir, vm.Name+".ign"), nil)
 	if err != nil {
 		return nil, err
 	}
 	vm.IgnitionFile = *ignitionFile
+	// create VMFile wrapper for vm image (which can be extracted to a shared function)
 	imagePath, err := machine.NewMachineFile(opts.ImagePath, nil)
 	if err != nil {
 		return nil, err
@@ -102,9 +107,12 @@ func (p *Virtualization) NewMachine(opts machine.InitOptions) (machine.VM, error
 	if err != nil {
 		return nil, err
 	}
+	// set the filepaths for the virtual machine pid file and the proxy pid file
 	if err := vm.setPIDSocket(); err != nil {
 		return nil, err
 	}
+
+	// could move all of the non-command generating code "up" so that we can extract generating the command to a separate function
 	cmd := []string{execPath}
 	// Add memory
 	cmd = append(cmd, []string{"-m", strconv.Itoa(int(vm.Memory))}...)
@@ -124,6 +132,7 @@ func (p *Virtualization) NewMachine(opts machine.InitOptions) (machine.VM, error
 	// Right now the mac address is hardcoded so that the host networking gives it a specific IP address.  This is
 	// why we can only run one vm at a time right now
 	cmd = append(cmd, []string{"-netdev", "socket,id=vlan,fd=3", "-device", "virtio-net-pci,netdev=vlan,mac=5a:94:ef:e4:0c:ee"}...)
+	// set the path for the virtual machine's ready socket
 	if err := vm.setReadySocket(); err != nil {
 		return nil, err
 	}
@@ -146,23 +155,29 @@ func (p *Virtualization) NewMachine(opts machine.InitOptions) (machine.VM, error
 func migrateVM(configPath string, config []byte, vm *MachineVM) error {
 	fmt.Printf("Migrating machine %q\n", vm.Name)
 	var old MachineVMV1
+	// convert the contents of the JSON config file to a MachineVMV1 instance
 	err := json.Unmarshal(config, &old)
 	if err != nil {
 		return err
 	}
 	// Looks like we loaded the older structure; now we need to migrate
 	// from the old structure to the new structure
+	// use of deprecated function
+	// returns the qemu socket path, pidfile to the virtual machine
 	_, pidFile, err := vm.getSocketandPid()
 	if err != nil {
 		return err
 	}
 
+	// create a VMFile instance from the pidfile
 	pidFilePath := machine.VMFile{Path: pidFile}
+	// Monitor is used to give commands the QEMU emulator
 	qmpMonitor := Monitor{
 		Address: machine.VMFile{Path: old.QMPMonitor.Address},
 		Network: old.QMPMonitor.Network,
 		Timeout: old.QMPMonitor.Timeout,
 	}
+	// returns path to a tmp runtime directory
 	socketPath, err := getRuntimeDir()
 	if err != nil {
 		return err
@@ -170,9 +185,14 @@ func migrateVM(configPath string, config []byte, vm *MachineVM) error {
 	virtualSocketPath := filepath.Join(socketPath, "podman", vm.Name+"_ready.sock")
 	readySocket := machine.VMFile{Path: virtualSocketPath}
 
+	// same consolodations as below
 	vm.HostUser = machine.HostUser{}
+	// Could consolodate initializing composed values
 	vm.ImageConfig = machine.ImageConfig{}
+	// we set up the machine.ResourceConfig here, but then we set the CPUs, DiskSize,
+	//  and Memory down below, could just consolodate
 	vm.ResourceConfig = machine.ResourceConfig{}
+	// Same consolodations as above
 	vm.SSHConfig = machine.SSHConfig{}
 
 	ignitionFilePath, err := machine.NewMachineFile(old.IgnitionFilePath, nil)
@@ -189,6 +209,7 @@ func migrateVM(configPath string, config []byte, vm *MachineVM) error {
 		return err
 	}
 
+	// most of these assignments can be done above (CPUs, DiskSize, Memory with ResourceConfig, etc.)
 	vm.CPUs = old.CPUs
 	vm.CmdLine = old.CmdLine
 	vm.DiskSize = old.DiskSize
@@ -238,29 +259,43 @@ func (p *Virtualization) LoadVMByName(name string) (machine.VM, error) {
 
 // Init writes the json configuration file to the filesystem for
 // other verbs (start, stop)
+// This function could use some trimming down and extraction of known
+// related chunks
 func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 	var (
 		key string
 	)
+	// get the path to the ssh key associated with the virtual machine
 	v.IdentityPath = util.GetIdentityPath(v.Name)
 	v.Rootful = opts.Rootful
 
 	switch opts.ImagePath {
 	// TODO these need to be re-typed as FCOSStreams
+	// FCOS Streams are Fedora CoreOS update streams
+	// stable: most reliable with changes only reaching it after spending time in `testing`
+	// testing: represents what is coming in the next `stable` release. content is updated
+	//          regularly and offers an opportunity to catch breaking changes before they reach `stable`
+	// next: often used to experiment with new features and also test out rebases of platform on top of the next major Fedora release.
+	// 		 content will usually filter down to `testing` and then into `stable`
+
+	// This case appears to be used when the user doesn't provide an image that they want to use
 	case machine.Testing.String(), machine.Next.String(), machine.Stable.String(), "":
 		// Get image as usual
 		v.ImageStream = opts.ImagePath
 		vp := GetVirtualizationProvider()
+		// Get a DistributedDownload instance that represents the virtual machine image pulled from the FCOSStream
 		dd, err := machine.NewFcosDownloader(vmtype, v.Name, machine.FCOSStreamFromString(opts.ImagePath), vp)
 
 		if err != nil {
 			return false, err
 		}
+		// VMFile instance representing the DistributedDownload instance's uncompressed file
 		uncompressedFile, err := machine.NewMachineFile(dd.Get().LocalUncompressedFile, nil)
 		if err != nil {
 			return false, err
 		}
 		v.ImagePath = *uncompressedFile
+		// actually download the vm image from the FCOSStream if it isn't already cached
 		if err := machine.DownloadImage(dd); err != nil {
 			return false, err
 		}
@@ -268,15 +303,20 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 		// The user has provided an alternate image which can be a file path
 		// or URL.
 		v.ImageStream = "custom"
+		// GenericDownloader is only used when the disk image is provided by the user
 		g, err := machine.NewGenericDownloader(vmtype, v.Name, opts.ImagePath)
 		if err != nil {
 			return false, err
 		}
+		// Create a VMFile instance based on the image the user provided
+		// Everything below this point in the default case is also in the case above,
+		// so these lines can be taken out of the switch and executed afterwards
 		imagePath, err := machine.NewMachineFile(g.Get().LocalUncompressedFile, nil)
 		if err != nil {
 			return false, err
 		}
 		v.ImagePath = *imagePath
+		// actually download the vm image the user provided
 		if err := machine.DownloadImage(g); err != nil {
 			return false, err
 		}
@@ -284,6 +324,13 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 	// Add arch specific options including image location
 	v.CmdLine = append(v.CmdLine, v.addArchOptions()...)
 	var volumeType string
+	/* maybe do the following instead of the switch statement where we still document that "" is the default driver:
+	 if opts.VolumeDriver != "virtfs" && opts.VolumeDriver != "" {
+		return false, fmt.Errorf("unknown volume driver:%s", opts.VolumeDriver)
+	 }
+
+	 volumeType = VolumeTypeVirtfs
+	*/
 	switch opts.VolumeDriver {
 	case "virtfs":
 		volumeType = VolumeTypeVirtfs
@@ -294,6 +341,7 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 		return false, err
 	}
 
+	// iterate over the mounts provided by the user and add them to the virtual machine
 	mounts := []machine.Mount{}
 	for i, volume := range opts.Volumes {
 		tag := fmt.Sprintf("vol%d", i)
@@ -301,6 +349,8 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 		source := extractSourcePath(paths)
 		target := extractTargetPath(paths)
 		readonly, securityModel := extractMountOptions(paths)
+		// this conditional here is moot, it has to be VolumeTypeVirtfs
+		// Unless, there are intentions to add other volume types, then this would make sense
 		if volumeType == VolumeTypeVirtfs {
 			virtfsOptions := fmt.Sprintf("local,path=%s,mount_tag=%s,security_model=%s", source, tag, securityModel)
 			if readonly {
@@ -316,6 +366,7 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 	// Add location of bootable image
 	v.CmdLine = append(v.CmdLine, "-drive", "if=virtio,file="+v.getImageFile())
 	// This kind of stinks but no other way around this r/n
+	// Add the SSH connections to the podman sockets
 	if len(opts.IgnitionPath) < 1 {
 		uri := machine.SSHRemoteConnection.MakeSSHURL(machine.LocalhostIP, fmt.Sprintf("/run/user/%d/podman/podman.sock", v.UID), strconv.Itoa(v.Port), v.RemoteUsername)
 		uriRoot := machine.SSHRemoteConnection.MakeSSHURL(machine.LocalhostIP, "/run/podman/podman.sock", strconv.Itoa(v.Port), "root")
@@ -351,6 +402,7 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 		}
 	}
 	// Run arch specific things that need to be done
+	// sometimes this just straight returns nil, sometimes it actually does operations
 	if err := v.prepare(); err != nil {
 		return false, err
 	}
@@ -428,6 +480,7 @@ func (v *MachineVM) Set(_ string, opts machine.SetOptions) ([]error, error) {
 		return setErrors, err
 	}
 
+	// cannot modify already running machine
 	if state == machine.Running {
 		suffix := ""
 		if v.Name != machine.DefaultMachineName {
@@ -475,6 +528,9 @@ func (v *MachineVM) Set(_ string, opts machine.SetOptions) ([]error, error) {
 }
 
 // Start executes the qemu command line and forks it
+// this function could use a trim, quite long (~230 lines)
+// would be nice to extract some chunks out to helper functions so that
+// its easier to read and understand
 func (v *MachineVM) Start(name string, opts machine.StartOptions) error {
 	var (
 		conn           net.Conn
@@ -484,6 +540,7 @@ func (v *MachineVM) Start(name string, opts machine.StartOptions) error {
 	)
 
 	v.Starting = true
+	// write the JSON config before and after starting the machine
 	if err := v.writeConfig(); err != nil {
 		return fmt.Errorf("writing JSON file: %w", err)
 	}
@@ -496,17 +553,20 @@ func (v *MachineVM) Start(name string, opts machine.StartOptions) error {
 	defer doneStarting()
 
 	c := make(chan os.Signal, 1)
+	// os.Interrupt and syscall.SIGTERM signals are relayed to c
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		_, ok := <-c
 		if !ok {
 			return
 		}
+		// if we recieve an interrupt or SIGTERM, then we are done executing the program
 		doneStarting()
 		os.Exit(1)
 	}()
 	defer close(c)
 
+	// check if the machine uid is undefined (-1)
 	if v.isIncompatible() {
 		logrus.Errorf("machine %q is incompatible with this release of podman and needs to be recreated, starting for recovery only", v.Name)
 	}
@@ -516,6 +576,7 @@ func (v *MachineVM) Start(name string, opts machine.StartOptions) error {
 		return fmt.Errorf("unable to start host networking: %q", err)
 	}
 
+	// temp runtime directory
 	rtPath, err := getRuntimeDir()
 	if err != nil {
 		return err
@@ -534,6 +595,7 @@ func (v *MachineVM) Start(name string, opts machine.StartOptions) error {
 	if err := v.QMPMonitor.Address.Delete(); err != nil {
 		return err
 	}
+	// make six attempts at trying to connect to the qemu socket?
 	for i := 0; i < 6; i++ {
 		qemuSocketConn, err = net.Dial("unix", v.QMPMonitor.Address.GetPath())
 		if err == nil {
@@ -545,6 +607,7 @@ func (v *MachineVM) Start(name string, opts machine.StartOptions) error {
 	if err != nil {
 		return err
 	}
+	// shouldn't this go before the error check? dangling pointer?
 	defer qemuSocketConn.Close()
 
 	fd, err := qemuSocketConn.(*net.UnixConn).File()
@@ -552,6 +615,8 @@ func (v *MachineVM) Start(name string, opts machine.StartOptions) error {
 		return err
 	}
 	defer fd.Close()
+	// are we discarding anything we write to the device and making
+	// sure we get validation that the write was successful?
 	dnr, err := os.OpenFile(os.DevNull, os.O_RDONLY, 0755)
 	if err != nil {
 		return err
@@ -564,10 +629,13 @@ func (v *MachineVM) Start(name string, opts machine.StartOptions) error {
 	defer dnw.Close()
 
 	attr := new(os.ProcAttr)
+	// what's the purpose of having two writeable devnull devices for the virtual machine
 	files := []*os.File{dnr, dnw, dnw, fd}
 	attr.Files = files
 	cmdLine := v.CmdLine
 
+	// propagate proxy and SSL settings on a start and avoid a need of re-creating/re-initiating a VM
+	// not really sure what that means, to be honest
 	cmdLine = propagateHostEnv(cmdLine)
 
 	// Disable graphic window when not in debug mode
@@ -588,12 +656,14 @@ func (v *MachineVM) Start(name string, opts machine.StartOptions) error {
 		Stderr:     stderrBuf,
 		ExtraFiles: []*os.File{fd},
 	}
+	// actually run the command that starts the virtual machine
 	err = cmd.Start()
 	if err != nil {
 		// check if qemu was not found
 		if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
+		// wouldn't the above error be hit first before the following code gets executed? wouldn't it return ErrNotExist even if the path to qemu changed?
 		// look up qemu again maybe the path was changed, https://github.com/containers/podman/issues/13394
 		cfg, err := config.Default()
 		if err != nil {
@@ -615,6 +685,7 @@ func (v *MachineVM) Start(name string, opts machine.StartOptions) error {
 		fmt.Println("Waiting for VM ...")
 	}
 
+	// we already retrieved the temp runtime directory above
 	socketPath, err := getRuntimeDir()
 	if err != nil {
 		return err
@@ -658,6 +729,9 @@ func (v *MachineVM) Start(name string, opts machine.StartOptions) error {
 		if err != nil {
 			return err
 		}
+		// check to see if the port is listening
+		// before we can mount the volume(s) to the virtual machine,
+		// it either needs to be running or the port has to be listening
 		listening := v.isListening()
 		for state != machine.Running || !listening {
 			time.Sleep(100 * time.Millisecond)
@@ -668,6 +742,7 @@ func (v *MachineVM) Start(name string, opts machine.StartOptions) error {
 			listening = v.isListening()
 		}
 	}
+	// mount the volumes to the virtual machine
 	for _, mount := range v.Mounts {
 		if !opts.Quiet {
 			fmt.Printf("Mounting volume... %s:%s\n", mount.Source, mount.Target)
@@ -683,10 +758,18 @@ func (v *MachineVM) Start(name string, opts machine.StartOptions) error {
 		if !strings.HasPrefix(mount.Target, "/home") && !strings.HasPrefix(mount.Target, "/mnt") {
 			args = append(args, ";", "sudo", "chattr", "+i", "/", ";")
 		}
+		// ssh into the virtual machine to create the mountpoint directory if it doesn't exist
 		err = v.SSH(name, machine.SSHOptions{Args: args})
 		if err != nil {
 			return err
 		}
+
+		/* could just write this as:
+		if mount.Type != MountType9p {
+			handle error
+		}
+		... (what would be in the MountType9p block)
+		*/
 		switch mount.Type {
 		case MountType9p:
 			mountOptions := []string{"-t", "9p"}
@@ -695,6 +778,7 @@ func (v *MachineVM) Start(name string, opts machine.StartOptions) error {
 			if mount.ReadOnly {
 				mountOptions = append(mountOptions, []string{"-o", "ro"}...)
 			}
+			// ssh into the virtual machine to mount the volume
 			err = v.SSH(name, machine.SSHOptions{Args: append([]string{"-q", "--", "sudo", "mount"}, mountOptions...)})
 			if err != nil {
 				return err
@@ -704,6 +788,7 @@ func (v *MachineVM) Start(name string, opts machine.StartOptions) error {
 		}
 	}
 
+	// print info about the now running virtual machine
 	v.waitAPIAndPrintInfo(forwardState, forwardSock, opts.NoInfo)
 	return nil
 }
@@ -711,6 +796,7 @@ func (v *MachineVM) Start(name string, opts machine.StartOptions) error {
 // propagateHostEnv is here for providing the ability to propagate
 // proxy and SSL settings (e.g. HTTP_PROXY and others) on a start
 // and avoid a need of re-creating/re-initiating a VM
+// zero clue what this means
 func propagateHostEnv(cmdLine []string) []string {
 	varsToPropagate := make([]string, 0)
 
@@ -761,6 +847,7 @@ func (v *MachineVM) checkStatus(monitor *qmp.SocketMonitor) (machine.Status, err
 	if err != nil {
 		return "", err
 	}
+	// send the string to execute to the qemu emulator?
 	b, err := monitor.Run(input)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -774,6 +861,7 @@ func (v *MachineVM) checkStatus(monitor *qmp.SocketMonitor) (machine.Status, err
 	if response.Response.Status == machine.Running {
 		return machine.Running, nil
 	}
+	// Only returns two statuses? running or stopped?
 	return machine.Stopped, nil
 }
 
@@ -793,11 +881,14 @@ func (v *MachineVM) Stop(_ string, _ machine.StopOptions) error {
 		}
 		return nil
 	}
+	// since we don't have a qmp socket for the virtual machine, create one
 	qmpMonitor, err := qmp.NewSocketMonitor(v.QMPMonitor.Network, v.QMPMonitor.Address.GetPath(), v.QMPMonitor.Timeout)
 	if err != nil {
 		return err
 	}
 	// Simple JSON formation for the QAPI
+	// we've done this inline struct two times now, why not just make it its own
+	// file-wide structure
 	stopCommand := struct {
 		Execute string `json:"execute"`
 	}{
@@ -807,6 +898,7 @@ func (v *MachineVM) Stop(_ string, _ machine.StopOptions) error {
 	if err != nil {
 		return err
 	}
+	// Connect to the new qmp socket
 	if err := qmpMonitor.Connect(); err != nil {
 		return err
 	}
@@ -818,10 +910,12 @@ func (v *MachineVM) Stop(_ string, _ machine.StopOptions) error {
 		}
 	}()
 
+	// execute the system_powerdown
 	if _, err = qmpMonitor.Run(input); err != nil {
 		return err
 	}
 
+	// if the virtual machine's pid doesn't exist, system_shutdown successful
 	if _, err := os.Stat(v.PidFilePath.GetPath()); os.IsNotExist(err) {
 		return nil
 	}
@@ -829,6 +923,7 @@ func (v *MachineVM) Stop(_ string, _ machine.StopOptions) error {
 	if err != nil {
 		return err
 	}
+	// get the proxy pid and convert it to an int
 	proxyPid, err := strconv.Atoi(string(proxyPidString))
 	if err != nil {
 		return err
@@ -838,6 +933,10 @@ func (v *MachineVM) Stop(_ string, _ machine.StopOptions) error {
 	if proxyProc == nil && err != nil {
 		return err
 	}
+
+	// at this point in the execution, the proxy process exists
+	// I think the following "cleanup" code could be moved to some sort of
+	// QMPCleanup function
 
 	v.LastUp = time.Now()
 	if err := v.writeConfig(); err != nil { // keep track of last up
@@ -898,6 +997,7 @@ func (v *MachineVM) Stop(_ string, _ machine.StopOptions) error {
 		return err
 	}
 
+	// wait for the vm pid to die
 	fmt.Println("Waiting for VM to exit...")
 	for isProcessAlive(vmPid) {
 		time.Sleep(500 * time.Millisecond)
@@ -907,7 +1007,13 @@ func (v *MachineVM) Stop(_ string, _ machine.StopOptions) error {
 }
 
 // NewQMPMonitor creates the monitor subsection of our vm
+// I think this QMP monitor code should be moved out of this file. I think this
+// file should just be for machine implementaiton and any helper functions.
+// Although this is a helper function, I think where its soley associated with
+// QMP, and there are most likely other functions for purely QMP setup, it would
+// be worthwhile possible extracting that out
 func NewQMPMonitor(network, name string, timeout time.Duration) (Monitor, error) {
+	// get the temporary runtime directory
 	rtDir, err := getRuntimeDir()
 	if err != nil {
 		return Monitor{}, err
@@ -924,6 +1030,7 @@ func NewQMPMonitor(network, name string, timeout time.Duration) (Monitor, error)
 	if timeout == 0 {
 		timeout = defaultQMPTimeout
 	}
+	// Create a new VMFile instance wrapper around the qmp monitor socket
 	address, err := machine.NewMachineFile(filepath.Join(rtDir, "qmp_"+name+".sock"), nil)
 	if err != nil {
 		return Monitor{}, err
@@ -975,6 +1082,8 @@ func (v *MachineVM) Remove(_ string, opts machine.RemoveOptions) (string, func()
 		files = append(files, *socketPath.Symlink)
 	}
 	files = append(files, socketPath.Path)
+	// I'm assuming that archRemovalFiles() are files that are to be removed
+	// based on a specific architecture?
 	files = append(files, v.archRemovalFiles()...)
 
 	vmConfigDir, err := machine.GetConfDir(vmtype)
@@ -983,6 +1092,8 @@ func (v *MachineVM) Remove(_ string, opts machine.RemoveOptions) (string, func()
 	}
 	files = append(files, filepath.Join(vmConfigDir, v.Name+".json"))
 	confirmationMessage := "\nThe following files will be deleted:\n\n"
+	// display all the files that are going to be deleted by doing this
+	// operation
 	for _, msg := range files {
 		confirmationMessage += msg + "\n"
 	}
@@ -1002,11 +1113,13 @@ func (v *MachineVM) Remove(_ string, opts machine.RemoveOptions) (string, func()
 
 	confirmationMessage += "\n"
 	return confirmationMessage, func() error {
+		// delete all the files
 		for _, f := range files {
 			if err := os.Remove(f); err != nil && !errors.Is(err, os.ErrNotExist) {
 				logrus.Error(err)
 			}
 		}
+		// remove any ssh connections
 		if err := machine.RemoveConnections(v.Name, v.Name+"-root"); err != nil {
 			logrus.Error(err)
 		}
@@ -1016,9 +1129,12 @@ func (v *MachineVM) Remove(_ string, opts machine.RemoveOptions) (string, func()
 
 func (v *MachineVM) State(bypass bool) (machine.Status, error) {
 	// Check if qmp socket path exists
+	// maybe make this a function since we have done it more than once at this point?
 	if _, err := os.Stat(v.QMPMonitor.Address.GetPath()); os.IsNotExist(err) {
 		return "", nil
 	}
+	// documentation says it returns the config of the virtual machien in JSON,
+	// but that is misleading considering it just returns an object of type error
 	err := v.update()
 	if err != nil {
 		return "", err
@@ -1037,6 +1153,7 @@ func (v *MachineVM) State(bypass bool) (machine.Status, error) {
 		}
 		return "", err
 	}
+	// connect to the qmp socket
 	if err := monitor.Connect(); err != nil {
 		return "", err
 	}
@@ -1049,6 +1166,7 @@ func (v *MachineVM) State(bypass bool) (machine.Status, error) {
 	return v.checkStatus(monitor)
 }
 
+// check to see if we can connect to the virtual machine socket
 func (v *MachineVM) isListening() bool {
 	// Check if we can dial it
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", "127.0.0.1", v.Port), 10*time.Millisecond)
@@ -1090,14 +1208,18 @@ func getDiskSize(path string) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
+	// get info of the virtual machien image from qemu
 	diskInfo := exec.Command(qemuPathDir, "info", "--output", "json", path)
 	stdout, err := diskInfo.StdoutPipe()
 	if err != nil {
 		return 0, err
 	}
+	// Not sure what this does, will need to take a look when get wifi
 	if err := diskInfo.Start(); err != nil {
 		return 0, err
 	}
+	// I feel like these fields should be documented. I don't know what a dirty
+	// flag, cluster size, or format specific is supposed to represent
 	tmpInfo := struct {
 		VirtualSize    uint64 `json:"virtual-size"`
 		Filename       string `json:"filename"`
@@ -1109,9 +1231,12 @@ func getDiskSize(path string) (uint64, error) {
 		}
 		DirtyFlag bool `json:"dirty-flag"`
 	}{}
+	// take the JSON from the command's stdout pipe and put it into the tmpInfo
+    // struct
 	if err := json.NewDecoder(stdout).Decode(&tmpInfo); err != nil {
 		return 0, err
 	}
+	// wait for the command to exit
 	if err := diskInfo.Wait(); err != nil {
 		return 0, err
 	}
@@ -1123,7 +1248,10 @@ func (p *Virtualization) List(_ machine.ListOptions) ([]*machine.ListResponse, e
 	return getVMInfos()
 }
 
+// This code is identical to the mac implementation except for the migration 
+// aspect of the code. This can definitely be refactored
 func getVMInfos() ([]*machine.ListResponse, error) {
+    // get the json config directory
 	vmConfigDir, err := machine.GetConfDir(vmtype)
 	if err != nil {
 		return nil, err
@@ -1139,6 +1267,7 @@ func getVMInfos() ([]*machine.ListResponse, error) {
 			if err != nil {
 				return err
 			}
+            // populate the virtual machine instance with the JSON config data
 			err = json.Unmarshal(b, vm)
 			if err != nil {
 				// Checking if the file did not unmarshal because it is using
@@ -1239,6 +1368,7 @@ func (p *Virtualization) Format() machine.ImageFormat {
 // startHostNetworking runs a binary on the host system that allows users
 // to set up port forwarding to the podman virtual machine
 func (v *MachineVM) startHostNetworking() (string, machine.APIForwardingState, error) {
+    // default container config
 	cfg, err := config.Default()
 	if err != nil {
 		return "", machine.NoForwarding, err
@@ -1248,7 +1378,9 @@ func (v *MachineVM) startHostNetworking() (string, machine.APIForwardingState, e
 		return "", machine.NoForwarding, err
 	}
 
+    // attributes applied to the process that will be started
 	attr := new(os.ProcAttr)
+    // the following two file creations are repeated every time, can be extracted
 	dnr, err := os.OpenFile(os.DevNull, os.O_RDONLY, 0755)
 	if err != nil {
 		return "", machine.NoForwarding, err
@@ -1269,6 +1401,7 @@ func (v *MachineVM) startHostNetworking() (string, machine.APIForwardingState, e
 
 	var forwardSock string
 	var state machine.APIForwardingState
+    // incompatible virtual machine would have UID -1
 	if !v.isIncompatible() {
 		cmd, forwardSock, state = v.setupAPIForwarding(cmd)
 	}
@@ -1285,6 +1418,7 @@ func (v *MachineVM) startHostNetworking() (string, machine.APIForwardingState, e
 }
 
 func (v *MachineVM) setupAPIForwarding(cmd []string) ([]string, string, machine.APIForwardingState) {
+    // path to the podman socket for the image
 	socket, err := v.forwardSocketPath()
 
 	if err != nil {
@@ -1308,6 +1442,7 @@ func (v *MachineVM) setupAPIForwarding(cmd []string) ([]string, string, machine.
 	// This allows the helper to only have to maintain one constant target to the user, which can be
 	// repositioned without updating docker.sock.
 
+    // socket is located in parent directory of machine dirs (one per user)
 	link, err := v.userGlobalSocketLink()
 	if err != nil {
 		return cmd, socket.GetPath(), machine.MachineLocal
@@ -1338,6 +1473,8 @@ func (v *MachineVM) setupAPIForwarding(cmd []string) ([]string, string, machine.
 			return cmd, socket.GetPath(), machine.MachineLocal
 		}
 
+        // Why not stick this condition under the above nested condition? wouldn't
+        // that save us the time of checking the same conditions multiple times
 		if !claimDockerSock() {
 			logrus.Warn("podman helper is installed, but was not able to claim the global docker sock")
 			return cmd, socket.GetPath(), machine.MachineLocal
@@ -1361,6 +1498,7 @@ func (v *MachineVM) userGlobalSocketLink() (string, error) {
 	return filepath.Join(filepath.Dir(path), "podman.sock"), err
 }
 
+// same implementation as mac
 func (v *MachineVM) forwardSocketPath() (*machine.VMFile, error) {
 	sockName := "podman.sock"
 	path, err := machine.GetDataDir(machine.QemuVirt)
@@ -1387,10 +1525,12 @@ func (v *MachineVM) setConfigPath() error {
 
 func (v *MachineVM) setReadySocket() error {
 	readySocketName := v.Name + "_ready.sock"
+    // temporary runtime directory
 	rtPath, err := getRuntimeDir()
 	if err != nil {
 		return err
 	}
+    // path to the podman ready socket as a VMFile instance
 	virtualSocketPath, err := machine.NewMachineFile(filepath.Join(rtPath, "podman", readySocketName), &readySocketName)
 	if err != nil {
 		return err
@@ -1546,6 +1686,8 @@ func (v *MachineVM) waitAPIAndPrintInfo(forwardState machine.APIForwardingState,
 
 // update returns the content of the VM's
 // configuration file in json
+// I think this documentation is misleading. It isn't returning a string that
+// contains the content of the json config file, it's returning an error
 func (v *MachineVM) update() error {
 	if err := v.setConfigPath(); err != nil {
 		return err
@@ -1557,6 +1699,7 @@ func (v *MachineVM) update() error {
 		}
 		return err
 	}
+    // redundant error check
 	if err != nil {
 		return err
 	}
@@ -1567,6 +1710,8 @@ func (v *MachineVM) update() error {
 			return err
 		}
 	}
+    // doesn't the config need to get written here? any changes made to the machine
+    // won't be persisted
 	return err
 }
 

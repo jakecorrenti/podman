@@ -3,6 +3,7 @@
 
 package qemu
 
+// make all of these constants?
 func dockerClaimHelperInstalled() bool {
 	return false
 }

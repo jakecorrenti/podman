@@ -13,11 +13,16 @@ import (
 )
 
 func isProcessAlive(pid int) bool {
+	// if the signal is 0, then no signal is sent, but error checking is still
+	// performed. This can be used to check for the existance of a process ID
+	//  or GID
 	err := unix.Kill(pid, syscall.Signal(0))
+	// if we get a permissions error, then that means the process does exist
 	if err == nil || err == unix.EPERM {
 		return true
 	}
 	return false
+	// could just rewrite this as return (err == nil || err == unix.EPERM)
 }
 
 func checkProcessStatus(processHint string, pid int, stderrBuf *bytes.Buffer) error {
