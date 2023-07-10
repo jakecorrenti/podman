@@ -17,6 +17,21 @@ func (o *KubeOptions) ToParams() (url.Values, error) {
 	return util.ToParams(o)
 }
 
+// WithAddReserved set field AddReserved to given value
+func (o *KubeOptions) WithAddReserved(value bool) *KubeOptions {
+	o.AddReserved = &value
+	return o
+}
+
+// GetAddReserved returns value of field AddReserved
+func (o *KubeOptions) GetAddReserved() bool {
+	if o.AddReserved == nil {
+		var z bool
+		return z
+	}
+	return *o.AddReserved
+}
+
 // WithService set field Service to given value
 func (o *KubeOptions) WithService(value bool) *KubeOptions {
 	o.Service = &value

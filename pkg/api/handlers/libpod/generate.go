@@ -89,11 +89,12 @@ func GenerateKube(w http.ResponseWriter, r *http.Request) {
 	runtime := r.Context().Value(api.RuntimeKey).(*libpod.Runtime)
 	decoder := r.Context().Value(api.DecoderKey).(*schema.Decoder)
 	query := struct {
-		Names    []string `schema:"names"`
-		Service  bool     `schema:"service"`
-		Type     string   `schema:"type"`
-		Replicas int32    `schema:"replicas"`
-		NoTrunc  bool     `schema:"noTrunc"`
+		Names       []string `schema:"names"`
+		Service     bool     `schema:"service"`
+		Type        string   `schema:"type"`
+		Replicas    int32    `schema:"replicas"`
+		NoTrunc     bool     `schema:"noTrunc"`
+		AddReserved bool     `schema:"addReserved"`
 	}{
 		// Defaults would go here.
 		Replicas: 1,
@@ -117,6 +118,7 @@ func GenerateKube(w http.ResponseWriter, r *http.Request) {
 
 	containerEngine := abi.ContainerEngine{Libpod: runtime}
 	options := entities.GenerateKubeOptions{
+		AddReserved:        query.AddReserved,
 		Service:            query.Service,
 		Type:               generateType,
 		Replicas:           query.Replicas,

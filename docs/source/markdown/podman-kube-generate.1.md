@@ -30,6 +30,10 @@ Note that the generated Kubernetes YAML file can be used to re-run the deploymen
 
 ## OPTIONS
 
+#### **--add-reserved**
+
+Add reserved annotations in generated YAML file
+
 #### **--filename**, **-f**=*filename*
 
 Output to the given file instead of STDOUT. If the file already exists, `kube generate` refuses to replace it and returns an error.

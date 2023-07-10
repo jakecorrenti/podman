@@ -108,6 +108,11 @@ func (s *APIServer) registerKubeHandlers(r *mux.Router) error {
 	// description: Generate Kubernetes YAML based on a pod or container.
 	// parameters:
 	//  - in: query
+	//    name: addReserved
+	//    type: boolean
+	//    default: false
+	//    description: add reserved annotations in generated YAML file
+	//  - in: query
 	//    name: names
 	//    type: array
 	//    items:

@@ -37,6 +37,8 @@ type GenerateKubeOptions struct {
 	Replicas int32
 	// UseLongAnnotations - don't truncate annotations to the Kubernetes maximum length of 63 characters
 	UseLongAnnotations bool
+	// Add Reserved - add reserved annotations in the generated YAML file
+	AddReserved bool
 }
 
 type KubeGenerateOptions = GenerateKubeOptions

@@ -4,6 +4,8 @@ package generate
 //
 //go:generate go run ../generator/generator.go KubeOptions
 type KubeOptions struct {
+	// AddReserved - add reserved annotations to generated YAML file
+	AddReserved *bool
 	// Service - generate YAML for a Kubernetes _service_ object.
 	Service *bool
 	// Type - the k8s kind to be generated i.e Pod or Deployment
