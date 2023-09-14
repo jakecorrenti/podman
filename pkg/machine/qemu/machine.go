@@ -48,7 +48,7 @@ type MachineVM struct {
 	// ConfigPath is the path to the configuration file
 	ConfigPath machine.VMFile
 	// The command line representation of the qemu command
-	CmdLine []string
+	CmdLine QemuCmd
 	// HostUser contains info about host user
 	machine.HostUser
 	// ImageConfig describes the bootable image
@@ -161,7 +161,7 @@ func migrateVM(configPath string, config []byte, vm *MachineVM) error {
 	}
 
 	vm.CPUs = old.CPUs
-	vm.CmdLine = old.CmdLine
+	// vm.CmdLine = old.CmdLine
 	vm.DiskSize = old.DiskSize
 	vm.IdentityPath = old.IdentityPath
 	vm.IgnitionFile = *ignitionFilePath
@@ -215,11 +215,16 @@ func (v *MachineVM) addMountsToVM(opts machine.InitOptions) error {
 		target := extractTargetPath(paths)
 		readonly, securityModel := extractMountOptions(paths)
 		if volumeType == VolumeTypeVirtfs {
-			virtfsOptions := fmt.Sprintf("local,path=%s,mount_tag=%s,security_model=%s", source, tag, securityModel)
-			if readonly {
-				virtfsOptions += ",readonly"
+			sourcePath, err := machine.NewMachineFile(source, nil)
+			if err != nil {
+				return err
 			}
-			v.CmdLine = append(v.CmdLine, []string{"-virtfs", virtfsOptions}...)
+			v.CmdLine.Mounts = append(v.CmdLine.Mounts, Virtfs{
+				Path:          *sourcePath,
+				MountTag:      tag,
+				SecurityModel: securityModel,
+				ReadOnly:      readonly,
+			})
 			mounts = append(mounts, machine.Mount{Type: MountType9p, Tag: tag, Source: source, Target: target, ReadOnly: readonly})
 		}
 	}
@@ -295,7 +300,7 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 	v.ImageStream = strm.String()
 
 	// Add arch specific options including image location
-	v.CmdLine = append(v.CmdLine, v.addArchOptions()...)
+	v.addArchOptions()
 
 	if err := v.addMountsToVM(opts); err != nil {
 		return false, err
@@ -304,7 +309,7 @@ func (v *MachineVM) Init(opts machine.InitOptions) (bool, error) {
 	v.UID = os.Getuid()
 
 	// Add location of bootable image
-	v.CmdLine = append(v.CmdLine, "-drive", "if=virtio,file="+v.getImageFile())
+	v.CmdLine.BootableImage = v.getImageFile()
 
 	if err := machine.AddSSHConnectionsToPodmanSocket(
 		v.UID,
@@ -396,12 +401,12 @@ func (v *MachineVM) Set(_ string, opts machine.SetOptions) ([]error, error) {
 
 	if opts.CPUs != nil && v.CPUs != *opts.CPUs {
 		v.CPUs = *opts.CPUs
-		v.editCmdLine("-smp", strconv.Itoa(int(v.CPUs)))
+        v.CmdLine.CPUs = int(v.CPUs)
 	}
 
 	if opts.Memory != nil && v.Memory != *opts.Memory {
 		v.Memory = *opts.Memory
-		v.editCmdLine("-m", strconv.Itoa(int(v.Memory)))
+        v.CmdLine.Memory = int(v.Memory)
 	}
 
 	if opts.DiskSize != nil && v.DiskSize != *opts.DiskSize {
@@ -600,6 +605,11 @@ func (v *MachineVM) Start(name string, opts machine.StartOptions) error {
 		qemuSocketConn net.Conn
 	)
 
+	qemuPath, err := findQEMUBinary()
+	if err != nil {
+		return err
+	}
+
 	defaultBackoff := 500 * time.Millisecond
 	maxBackoffs := 6
 
@@ -627,7 +637,7 @@ func (v *MachineVM) Start(name string, opts machine.StartOptions) error {
 		return err
 	}
 	if qemuPid != -1 {
-		return fmt.Errorf("cannot start VM %q: another instance of %q is already running with process ID %d: please stop and restart the VM", v.Name, v.CmdLine[0], qemuPid)
+		return fmt.Errorf("cannot start VM %q: another instance of %q is already running with process ID %d: please stop and restart the VM", v.Name, qemuPath, qemuPid)
 	}
 
 	v.Starting = true
@@ -711,7 +721,7 @@ func (v *MachineVM) Start(name string, opts machine.StartOptions) error {
 	// Disable graphic window when not in debug mode
 	// Done in start, so we're not suck with the debug level we used on init
 	if !logrus.IsLevelEnabled(logrus.DebugLevel) {
-		cmdLine = append(cmdLine, "-display", "none")
+		cmdLine.Display = false
 	}
 
 	logrus.Debugf("qemu cmd: %v", cmdLine)
@@ -720,8 +730,8 @@ func (v *MachineVM) Start(name string, opts machine.StartOptions) error {
 
 	// actually run the command that starts the virtual machine
 	cmd := &exec.Cmd{
-		Args:       cmdLine,
-		Path:       cmdLine[0],
+		Args:       append([]string{qemuPath}, cmdLine.ToCmdline()...),
+		Path:       qemuPath,
 		Stdin:      dnr,
 		Stdout:     dnw,
 		Stderr:     stderrBuf,
@@ -804,7 +814,7 @@ func (v *MachineVM) Start(name string, opts machine.StartOptions) error {
 // propagateHostEnv is here for providing the ability to propagate
 // proxy and SSL settings (e.g. HTTP_PROXY and others) on a start
 // and avoid a need of re-creating/re-initiating a VM
-func propagateHostEnv(cmdLine []string) []string {
+func propagateHostEnv(cmd QemuCmd) QemuCmd {
 	varsToPropagate := make([]string, 0)
 
 	for k, v := range machine.GetProxyVariables() {
@@ -821,13 +831,14 @@ func propagateHostEnv(cmdLine []string) []string {
 	}
 
 	if len(varsToPropagate) > 0 {
-		prefix := "name=opt/com.coreos/environment,string="
 		envVarsJoined := strings.Join(varsToPropagate, "|")
-		fwCfgArg := prefix + base64.StdEncoding.EncodeToString([]byte(envVarsJoined))
-		return append(cmdLine, "-fw_cfg", fwCfgArg)
+		cmd.FirmwareConfigs = append(cmd.FirmwareConfigs, FirmwareConfigDevice{
+			Name:         "opt/com.coreos/environment",
+			ConfigString: base64.StdEncoding.EncodeToString([]byte(envVarsJoined)),
+		})
 	}
 
-	return cmdLine
+	return cmd
 }
 
 func (v *MachineVM) checkStatus(monitor *qmp.SocketMonitor) (machine.Status, error) {
@@ -1627,20 +1638,6 @@ func (v *MachineVM) setRootful(rootful bool) error {
 
 	v.HostUser.Modified = true
 	return nil
-}
-
-func (v *MachineVM) editCmdLine(flag string, value string) {
-	found := false
-	for i, val := range v.CmdLine {
-		if val == flag {
-			found = true
-			v.CmdLine[i+1] = value
-			break
-		}
-	}
-	if !found {
-		v.CmdLine = append(v.CmdLine, []string{flag, value}...)
-	}
 }
 
 func isRootful() bool {

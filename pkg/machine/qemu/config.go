@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -42,30 +41,51 @@ func (v *MachineVM) setQMPMonitorSocket() error {
 
 // setNewMachineCMD configure the CLI command that will be run to create the new
 // machine
-func (v *MachineVM) setNewMachineCMD(qemuBinary string) {
-	cmd := []string{qemuBinary}
+func (v *MachineVM) setNewMachineCMD() {
+	cmd := QemuCmd{Mounts: []Virtfs{}, FirmwareConfigs: []FirmwareConfigDevice{}}
 	// Add memory
-	cmd = append(cmd, []string{"-m", strconv.Itoa(int(v.Memory))}...)
+	cmd.Memory = int(v.Memory)
 	// Add cpus
-	cmd = append(cmd, []string{"-smp", strconv.Itoa(int(v.CPUs))}...)
+	cmd.CPUs = int(v.CPUs)
 	// Add ignition file
-	cmd = append(cmd, []string{"-fw_cfg", "name=opt/com.coreos/config,file=" + v.IgnitionFile.GetPath()}...)
-	cmd = append(cmd, []string{"-qmp", v.QMPMonitor.Network + ":" + v.QMPMonitor.Address.GetPath() + ",server=on,wait=off"}...)
+	cmd.FirmwareConfigs = append(cmd.FirmwareConfigs, FirmwareConfigDevice{
+		Name:         "opt/com.coreos/config",
+		IgnitionFile: v.IgnitionFile,
+	})
+	cmd.QmpMonitor = QmpMonitor{
+		Monitor: v.QMPMonitor,
+		Server:  true,
+		Wait:    false,
+	}
 
 	// Add network
 	// Right now the mac address is hardcoded so that the host networking gives it a specific IP address.  This is
 	// why we can only run one vm at a time right now
-	cmd = append(cmd, []string{"-netdev", "socket,id=vlan,fd=3", "-device", "virtio-net-pci,netdev=vlan,mac=5a:94:ef:e4:0c:ee"}...)
+	cmd.Network = Network{
+		Socket{
+			ID:             "vlan",
+			FileDescriptor: 3,
+		},
+		VirtioNet{
+			NetDevice:  "vlan",
+			MacAddress: "5a:94:ef:e4:0c:ee",
+		},
+	}
 
 	// Add serial port for readiness
-	cmd = append(cmd, []string{
-		"-device", "virtio-serial",
-		// qemu needs to establish the long name; other connections can use the symlink'd
-		// Note both id and chardev start with an extra "a" because qemu requires that it
-		// starts with a letter but users can also use numbers
-		"-chardev", "socket,path=" + v.ReadySocket.Path + ",server=on,wait=off,id=a" + v.Name + "_ready",
-		"-device", "virtserialport,chardev=a" + v.Name + "_ready" + ",name=org.fedoraproject.port.0",
-		"-pidfile", v.VMPidFilePath.GetPath()}...)
+	cmd.SerialPort = SerialPort{
+		v.VMPidFilePath,
+		CharDev{
+			SocketPath: v.ReadySocket,
+			Server:     true,
+			Wait:       false,
+			ID:         fmt.Sprintf("a%s_ready", v.Name),
+		},
+		VirtSerialPort{
+			Name:    "org.fedoraproject.port.0",
+			CharDev: fmt.Sprintf("a%s_ready", v.Name),
+		},
+	}
 	v.CmdLine = cmd
 }
 
@@ -110,12 +130,6 @@ func (p *QEMUVirtualization) NewMachine(opts machine.InitOptions) (machine.VM, e
 
 	vm.Created = time.Now()
 
-	// find QEMU binary
-	execPath, err := findQEMUBinary()
-	if err != nil {
-		return nil, err
-	}
-
 	if err := vm.setPIDSocket(); err != nil {
 		return nil, err
 	}
@@ -130,7 +144,7 @@ func (p *QEMUVirtualization) NewMachine(opts machine.InitOptions) (machine.VM, e
 	}
 
 	// configure command to run
-	vm.setNewMachineCMD(execPath)
+	vm.setNewMachineCMD()
 	return vm, nil
 }
 

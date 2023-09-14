@@ -4,12 +4,9 @@ var (
 	QemuCommand = "qemu-system-x86_64"
 )
 
-func (v *MachineVM) addArchOptions() []string {
-	opts := []string{
-		"-accel", "kvm",
-		"-cpu", "host",
-	}
-	return opts
+func (v *MachineVM) addArchOptions() {
+    v.CmdLine.Accelerator = "kvm"
+    v.CmdLine.CPU = "host"
 }
 
 func (v *MachineVM) prepare() error {

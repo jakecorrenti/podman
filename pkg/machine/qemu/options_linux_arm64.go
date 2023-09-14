@@ -9,14 +9,11 @@ var (
 	QemuCommand = "qemu-system-aarch64"
 )
 
-func (v *MachineVM) addArchOptions() []string {
-	opts := []string{
-		"-accel", "kvm",
-		"-cpu", "host",
-		"-M", "virt,gic-version=max",
-		"-bios", getQemuUefiFile("QEMU_EFI.fd"),
-	}
-	return opts
+func (v *MachineVM) addArchOptions() {
+    v.CmdLine.Accelerator = "kvm"
+    v.CmdLine.CPU = "host"
+    v.CmdLine.Machine = "virt,gic-version=max"
+    v.CmdLine.Bios = getQemuUefiFile("QEMU_EFI.fd")
 }
 
 func (v *MachineVM) prepare() error {

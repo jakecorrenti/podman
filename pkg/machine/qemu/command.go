@@ -89,9 +89,10 @@ type Socket struct {
 func (s *Socket) ToCmdline() string {
 	vars := "socket"
 
-	if s.ID != "" {
-		vars += ",id=" + s.ID
-	}
+	// if s.ID != "" {
+	// 	vars += ",id=" + s.ID
+	// }
+	vars += ",id=vlan"
 
 	if s.FileDescriptor >= 0 {
 		vars += fmt.Sprintf(",fd=%d", s.FileDescriptor)
@@ -158,16 +159,17 @@ func (c *CharDev) ToCmdline() []string {
 	if vars != "" {
 		vars += ","
 	}
-	vars += "server=" + c.GetServerStatus() + ",wait=" + c.GetWaitStatus()
+	// vars += "server=" + c.GetServerStatus() + ",wait=" + c.GetWaitStatus()
+	vars += "server=" + "on" + ",wait=" + c.GetWaitStatus()
 
 	if vars != "" {
 		vars += ","
 	}
 
-	if c.ID != "" {
-		vars += ",id=" + c.ID
-	}
-	return []string{"-chardev", vars}
+	// if c.ID != "" {
+	// 	vars += ",id=" + c.ID
+	// }
+	return []string{"-chardev", vars + fmt.Sprintf("id=a%s_ready", "podman-machine-default")}
 }
 
 type VirtSerialPort struct {
@@ -196,7 +198,7 @@ type SerialPort struct {
 }
 
 func (s *SerialPort) ToCmdline() []string {
-	args := []string{"-device", "-virtio-serial"}
+	args := []string{"-device", "virtio-serial"}
 
 	args = append(args, s.CharDev.ToCmdline()...)
 	args = append(args, s.VirtSerialPort.ToCmdline()...)
@@ -280,9 +282,11 @@ func (q *QemuCmd) ToCmdline() []string {
 	args = append(args, "-accel", q.Accelerator)
 	args = append(args, "-cpu", q.CPU)
 	// bootable image
-	args = append(args, "-drive", "if=virtio.file="+q.BootableImage)
+	args = append(args, "-drive", "if=virtio,file="+q.BootableImage)
 	// bios
-	args = append(args, "-bios", q.Bios)
+	if q.Bios != "" {
+		args = append(args, "-bios", q.Bios)
+	}
 	// machine
 	args = append(args, "-M", q.Machine)
 	return args
