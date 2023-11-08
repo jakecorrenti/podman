@@ -124,11 +124,9 @@ func (v HyperVVirtualization) NewMachine(opts machine.InitOptions) (machine.VM, 
 
 	m.ConfigPath = *configPath
 
-	ignitionPath, err := machine.NewMachineFile(filepath.Join(configDir, m.Name)+".ign", nil)
-	if err != nil {
-		return nil, err
-	}
-	m.IgnitionFile = *ignitionPath
+    if err := machine.SetIgnitionFile(&m.IgnitionFile, vmtype, m.Name); err != nil {
+        return nil, err
+    }
 
 	// Set creation time
 	m.Created = time.Now()

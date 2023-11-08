@@ -62,10 +62,6 @@ func (v *MachineVM) setNewMachineCMD(qemuBinary string, cmdOpts *setNewMachineCM
 // NewMachine initializes an instance of a virtual machine based on the qemu
 // virtualization.
 func (p *QEMUVirtualization) NewMachine(opts machine.InitOptions) (machine.VM, error) {
-	vmConfigDir, err := machine.GetConfDir(vmtype)
-	if err != nil {
-		return nil, err
-	}
 	vm := new(MachineVM)
 	if len(opts.Name) > 0 {
 		vm.Name = opts.Name
@@ -77,11 +73,9 @@ func (p *QEMUVirtualization) NewMachine(opts machine.InitOptions) (machine.VM, e
 	}
 
 	// set VM ignition file
-	ignitionFile, err := machine.NewMachineFile(filepath.Join(vmConfigDir, vm.Name+".ign"), nil)
-	if err != nil {
+	if err := machine.SetIgnitionFile(&vm.IgnitionFile, vmtype, vm.Name); err != nil {
 		return nil, err
 	}
-	vm.IgnitionFile = *ignitionFile
 
 	// set VM image file
 	imagePath, err := machine.NewMachineFile(opts.ImagePath, nil)
@@ -120,12 +114,7 @@ func (p *QEMUVirtualization) NewMachine(opts machine.InitOptions) (machine.VM, e
 		return nil, err
 	}
 
-	runtimeDir, err := getRuntimeDir()
-	if err != nil {
-		return nil, err
-	}
-	symlink := vm.Name + "_ready.sock"
-	if err := machine.SetSocket(&vm.ReadySocket, machine.ReadySocketPath(runtimeDir+"/podman/", vm.Name), &symlink); err != nil {
+	if err := vm.setReadySocket(); err != nil {
 		return nil, err
 	}
 

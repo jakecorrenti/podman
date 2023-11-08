@@ -7,6 +7,20 @@ import (
 	"strings"
 )
 
+const QemuReadyUnit = `[Unit]
+Requires=dev-virtio\\x2dports-%s.device
+After=remove-moby.service sshd.socket sshd.service
+After=systemd-user-sessions.service
+OnFailure=emergency.target
+OnFailureJobMode=isolate
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c '/usr/bin/echo Ready >/dev/%s'
+[Install]
+RequiredBy=default.target
+`
+
 func getLocalTimeZone() (string, error) {
 	output, err := exec.Command("timedatectl", "show", "--property=Timezone").Output()
 	if errors.Is(err, exec.ErrNotFound) {

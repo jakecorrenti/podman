@@ -4,6 +4,7 @@
 package applehv
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -88,9 +89,16 @@ func (m *MacMachine) setGVProxyInfo(runtimeDir string) error {
 	if err != nil {
 		return err
 	}
-	m.GvProxyPid = *gvProxyPid
 
-	return machine.SetSocket(&m.GvProxySock, filepath.Join(runtimeDir, "gvproxy.sock"), nil)
+	gvProxySock, err := machine.NewMachineFile(filepath.Join(runtimeDir, "gvproxy.sock"), nil)
+	if err != nil {
+		return err
+	}
+
+	m.GvProxyPid = *gvProxyPid
+	m.GvProxySock = *gvProxySock
+
+	return nil
 }
 
 // setVfkitInfo stores the default devices, sets the vfkit endpoint, and
@@ -133,51 +141,6 @@ func (m *MacMachine) addMountsToVM(opts machine.InitOptions, virtiofsMnts *[]mac
 	m.Mounts = mounts
 
 	return nil
-}
-
-// writeIgnitionConfigFile generates the ignition config and writes it to the filesystem
-func (m *MacMachine) writeIgnitionConfigFile(opts machine.InitOptions, key string, virtiofsMnts *[]machine.VirtIoFs) error {
-	// Write the ignition file
-	ign := machine.DynamicIgnition{
-		Name:      opts.Username,
-		Key:       key,
-		VMName:    m.Name,
-		VMType:    machine.AppleHvVirt,
-		TimeZone:  opts.TimeZone,
-		WritePath: m.IgnitionFile.GetPath(),
-		UID:       m.UID,
-		Rootful:   m.Rootful,
-	}
-
-	if err := ign.GenerateIgnitionConfig(); err != nil {
-		return err
-	}
-
-	// ready is a unit file that sets up the virtual serial device
-	// where when the VM is done configuring, it will send an ack
-	// so a listening host knows it can being interacting with it
-	ready := `[Unit]
-		Requires=dev-virtio\\x2dports-%s.device
-		After=remove-moby.service sshd.socket sshd.service
-		OnFailure=emergency.target
-		OnFailureJobMode=isolate
-		[Service]
-		Type=oneshot
-		RemainAfterExit=yes
-		ExecStart=/bin/sh -c '/usr/bin/echo Ready | socat - VSOCK-CONNECT:2:1025'
-		[Install]
-		RequiredBy=default.target
-		`
-	readyUnit := machine.Unit{
-		Enabled:  machine.BoolToPtr(true),
-		Name:     "ready.service",
-		Contents: machine.StrToPtr(fmt.Sprintf(ready, "vsock")),
-	}
-	virtiofsUnits := generateSystemDFilesForVirtiofsMounts(*virtiofsMnts)
-	ign.Cfg.Systemd.Units = append(ign.Cfg.Systemd.Units, readyUnit)
-	ign.Cfg.Systemd.Units = append(ign.Cfg.Systemd.Units, virtiofsUnits...)
-
-	return ign.Write()
 }
 
 func (m *MacMachine) Init(opts machine.InitOptions) (bool, error) {
@@ -229,9 +192,11 @@ func (m *MacMachine) Init(opts machine.InitOptions) (bool, error) {
 		return false, err
 	}
 
-	if err := machine.SetSocket(&m.ReadySocket, machine.ReadySocketPath(runtimeDir, m.Name), nil); err != nil {
+	readySocket, err := machine.NewMachineFile(filepath.Join(runtimeDir, fmt.Sprintf("%s_ready.sock", m.Name)), nil)
+	if err != nil {
 		return false, err
 	}
+	m.ReadySocket = *readySocket
 
 	if err = m.setGVProxyInfo(runtimeDir); err != nil {
 		return false, err
@@ -279,6 +244,17 @@ func (m *MacMachine) Init(opts machine.InitOptions) (bool, error) {
 		return false, err
 	}
 
+	builder := machine.NewIgnitionBuilder(machine.DynamicIgnition{
+		Name:      opts.Username,
+		Key:       key,
+		VMName:    m.Name,
+		VMType:    machine.AppleHvVirt,
+		TimeZone:  opts.TimeZone,
+		WritePath: m.IgnitionFile.GetPath(),
+		UID:       m.UID,
+		Rootful:   m.Rootful,
+	})
+
 	if len(opts.IgnitionPath) < 1 {
 		key, err = machine.CreateSSHKeys(m.IdentityPath)
 		if err != nil {
@@ -288,14 +264,22 @@ func (m *MacMachine) Init(opts machine.InitOptions) (bool, error) {
 	}
 
 	if len(opts.IgnitionPath) > 0 {
-		inputIgnition, err := os.ReadFile(opts.IgnitionPath)
-		if err != nil {
-			return false, err
-		}
-		return false, os.WriteFile(m.IgnitionFile.GetPath(), inputIgnition, 0644)
+		return false, builder.BuildWithIgnitionFile(opts.IgnitionPath)
 	}
+
+	if err := builder.GenerateIgnitionConfig(); err != nil {
+		return false, err
+	}
+
+	builder.WithUnit(machine.Unit{
+		Enabled:  machine.BoolToPtr(true),
+		Name:     "ready.service",
+		Contents: machine.StrToPtr(fmt.Sprintf(machine.AppleHVReadyUnit, "vsock")),
+	})
+	builder.WithUnit(generateSystemDFilesForVirtiofsMounts(virtiofsMnts)...)
+
 	// TODO Ignition stuff goes here
-	err = m.writeIgnitionConfigFile(opts, key, &virtiofsMnts)
+	err = builder.Build()
 	callbackFuncs.Add(m.IgnitionFile.Delete)
 
 	return err == nil, err
@@ -670,22 +654,25 @@ func (m *MacMachine) Start(name string, opts machine.StartOptions) error {
 	logrus.Debug("waiting for ready notification")
 	var conn net.Conn
 	readyChan := make(chan error)
-	connChan := make(chan net.Conn)
-	go machine.ListenAndWaitOnSocket(readyChan, connChan, readyListen)
+	go func() {
+		conn, err = readyListen.Accept()
+		if err != nil {
+			logrus.Error(err)
+		}
+		_, err = bufio.NewReader(conn).ReadString('\n')
+		readyChan <- err
+	}()
 
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 
 	err = <-readyChan
-	conn = <-connChan
-	if conn != nil {
-		defer func() {
-			if closeErr := conn.Close(); closeErr != nil {
-				logrus.Error(closeErr)
-			}
-		}()
-	}
+	defer func() {
+		if closeErr := conn.Close(); closeErr != nil {
+			logrus.Error(closeErr)
+		}
+	}()
 	if err != nil {
 		return err
 	}
@@ -748,9 +735,9 @@ func (m *MacMachine) loadFromFile() (*MacMachine, error) {
 	if err != nil {
 		return nil, err
 	}
+	mm := MacMachine{}
 
-	mm, err := loadMacMachineFromJSON(jsonPath)
-	if err != nil {
+	if err := loadMacMachineFromJSON(jsonPath, &mm); err != nil {
 		return nil, err
 	}
 
@@ -760,23 +747,18 @@ func (m *MacMachine) loadFromFile() (*MacMachine, error) {
 	}
 	mm.lock = lock
 
-	return mm, nil
+	return &mm, nil
 }
 
-func loadMacMachineFromJSON(fqConfigPath string) (*MacMachine, error) {
+func loadMacMachineFromJSON(fqConfigPath string, macMachine *MacMachine) error {
 	b, err := os.ReadFile(fqConfigPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			name := strings.TrimSuffix(filepath.Base(fqConfigPath), ".json")
-			return nil, fmt.Errorf("%s: %w", name, machine.ErrNoSuchVM)
+			return fmt.Errorf("%q: %w", fqConfigPath, machine.ErrNoSuchVM)
 		}
-		return nil, err
+		return err
 	}
-	mm := new(MacMachine)
-	if err := json.Unmarshal(b, mm); err != nil {
-		return nil, err
-	}
-	return mm, nil
+	return json.Unmarshal(b, macMachine)
 }
 
 func (m *MacMachine) jsonConfigPath() (string, error) {

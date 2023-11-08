@@ -694,3 +694,51 @@ func GetPodmanDockerTmpConfig(uid int, rootful bool, newline bool) string {
 
 	return fmt.Sprintf("L+  /run/docker.sock   -    -    -     -   %s%s", podmanSock, suffix)
 }
+
+func SetIgnitionFile(loc *VMFile, vmtype VMType, vmName string) error {
+	vmConfigDir, err := GetConfDir(vmtype)
+	if err != nil {
+		return err
+	}
+
+	ignitionFile, err := NewMachineFile(filepath.Join(vmConfigDir, vmName+".ign"), nil)
+	if err != nil {
+		return err
+	}
+
+	*loc = *ignitionFile
+	return nil
+}
+
+type IgnitionBuilder struct {
+	dynamicIgnition DynamicIgnition
+	units           []Unit
+}
+
+func NewIgnitionBuilder(dynamicIgnition DynamicIgnition) IgnitionBuilder {
+	return IgnitionBuilder{
+		dynamicIgnition,
+		[]Unit{},
+	}
+}
+
+func (i *IgnitionBuilder) GenerateIgnitionConfig() error {
+	return i.dynamicIgnition.GenerateIgnitionConfig()
+}
+
+func (i *IgnitionBuilder) WithUnit(units ...Unit) {
+	i.dynamicIgnition.Cfg.Systemd.Units = append(i.dynamicIgnition.Cfg.Systemd.Units, units...)
+}
+
+func (i *IgnitionBuilder) BuildWithIgnitionFile(ignPath string) error {
+	inputIgnition, err := os.ReadFile(ignPath)
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(i.dynamicIgnition.WritePath, inputIgnition, 0644)
+}
+
+func (i *IgnitionBuilder) Build() error {
+	return i.dynamicIgnition.Write()
+}

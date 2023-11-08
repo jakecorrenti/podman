@@ -53,11 +53,12 @@ func (v AppleHVVirtualization) CheckExclusiveActiveVM() (bool, string, error) {
 }
 
 func (v AppleHVVirtualization) IsValidVMName(name string) (bool, error) {
+	mm := MacMachine{Name: name}
 	configDir, err := machine.GetConfDir(machine.AppleHvVirt)
 	if err != nil {
 		return false, err
 	}
-	if _, err := loadMacMachineFromJSON(configDir); err != nil {
+	if err := loadMacMachineFromJSON(configDir, &mm); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -127,11 +128,9 @@ func (v AppleHVVirtualization) NewMachine(opts machine.InitOptions) (machine.VM,
 		return nil, err
 	}
 
-	ignitionPath, err := machine.NewMachineFile(filepath.Join(configDir, m.Name)+".ign", nil)
-	if err != nil {
-		return nil, err
-	}
-	m.IgnitionFile = *ignitionPath
+    if err := machine.SetIgnitionFile(&m.IgnitionFile, vmtype, m.Name); err != nil {
+        return nil, err
+    }
 
 	// Set creation time
 	m.Created = time.Now()
@@ -182,14 +181,14 @@ func (v AppleHVVirtualization) loadFromLocalJson() ([]*MacMachine, error) {
 	}
 
 	for _, jsonFile := range jsonFiles {
-		mm, err := loadMacMachineFromJSON(jsonFile)
-		if err != nil {
+		mm := MacMachine{}
+		if err := loadMacMachineFromJSON(jsonFile, &mm); err != nil {
 			return nil, err
 		}
 		if err != nil {
 			return nil, err
 		}
-		mms = append(mms, mm)
+		mms = append(mms, &mm)
 	}
 	return mms, nil
 }
