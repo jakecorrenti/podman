@@ -113,7 +113,7 @@ type InspectInfo struct {
 	SSHConfig          vmconfigs.SSHConfig
 	State              define.Status
 	UserModeNetworking bool
-	Rootful            bool
+	HostUser           vmconfigs.HostUser
 }
 
 // GetCacheDir returns the dir where VM images are downloaded into when pulled

@@ -147,17 +147,29 @@ var _ = Describe("podman machine set", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(setSession).To(Exit(0))
 
+        inspect := new(inspectMachine)
+		inspect = inspect.withFormat("{{.HostUser.Modified}}")
+		inspectSession, err := mb.setName(name).setCmd(inspect).run()
+		Expect(err).ToNot(HaveOccurred())
+		Expect(inspectSession).To(Exit(0))
+		Expect(inspectSession.Bytes()).To(ContainSubstring("true"))
+
 		s := new(startMachine)
 		startSession, err := mb.setCmd(s).run()
 		Expect(err).ToNot(HaveOccurred())
 		Expect(startSession).To(Exit(0))
 
-		inspect := new(inspectMachine)
-		inspect = inspect.withFormat("{{.Rootful}}")
-		inspectSession, err := mb.setName(name).setCmd(inspect).run()
+		inspect = inspect.withFormat("{{.HostUser.Rootful}}")
+		inspectSession, err = mb.setName(name).setCmd(inspect).run()
 		Expect(err).ToNot(HaveOccurred())
 		Expect(inspectSession).To(Exit(0))
 		Expect(inspectSession.outputToString()).To(Equal("true"))
+
+		inspect = inspect.withFormat("{{.HostUser.Modified}}")
+		inspectSession, err = mb.setName(name).setCmd(inspect).run()
+		Expect(err).ToNot(HaveOccurred())
+		Expect(inspectSession).To(Exit(0))
+		Expect(inspectSession.outputToString()).To(Equal("false"))
 
 		ssh2 := sshMachine{}
 		sshSession2, err := mb.setName(name).setCmd(ssh2.withSSHCommand([]string{"readlink /var/run/docker.sock"})).run()

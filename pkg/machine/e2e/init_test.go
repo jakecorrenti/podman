@@ -247,7 +247,7 @@ var _ = Describe("podman machine init", func() {
 		Expect(ssession).Should(Exit(0))
 
 		inspect := new(inspectMachine)
-		inspect = inspect.withFormat("{{.Rootful}}")
+		inspect = inspect.withFormat("{{.HostUser.Rootful}}")
 		inspectSession, err := mb.setName(name).setCmd(inspect).run()
 		Expect(err).ToNot(HaveOccurred())
 		Expect(inspectSession).To(Exit(0))
