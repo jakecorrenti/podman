@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"time"
 
@@ -186,14 +187,19 @@ func (a AppleHVStubber) StartVM(mc *vmconfigs.MachineConfig) (func() error, func
 		return nil, nil, err
 	}
 
-	vfkitBinaryPath, err := cfg.FindHelperBinary(vfkitCommand, true)
+	applehvBackend := os.Getenv("CONTAINERS_MACHINE_APPLE_BACKEND")
+	if applehvBackend == "" {
+		applehvBackend = "vfkit"
+	}
+
+	binaryPath, err := cfg.FindHelperBinary(applehvBackend, true)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	logrus.Debugf("vfkit path is: %s", vfkitBinaryPath)
+	logrus.Debugf("%s path is: %s", applehvBackend, binaryPath)
 
-	cmd, err := vm.Cmd(vfkitBinaryPath)
+	cmd, err := vm.Cmd(binaryPath)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -265,7 +271,7 @@ func (a AppleHVStubber) StartVM(mc *vmconfigs.MachineConfig) (func() error, func
 	readyChan := make(chan error)
 	go sockets.ListenAndWaitOnSocket(readyChan, readyListen)
 
-	logrus.Debugf("vfkit command-line: %v", cmd.Args)
+	logrus.Debugf("%s command-line: %v", applehvBackend, cmd.Args)
 
 	if err := cmd.Start(); err != nil {
 		return nil, nil, err
@@ -283,7 +289,7 @@ func (a AppleHVStubber) StartVM(mc *vmconfigs.MachineConfig) (func() error, func
 					return
 				default:
 				}
-				if err := checkProcessRunning("vfkit", cmd.Process.Pid); err != nil {
+				if err := checkProcessRunning(applehvBackend, cmd.Process.Pid); err != nil {
 					processErrChan <- err
 					return
 				}
