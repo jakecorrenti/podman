@@ -85,7 +85,7 @@ func UpdateConnectionIfDefault(rootful bool, name, rootfulName string) error {
 	})
 }
 
-func RemoveConnections(names ...string) error {
+func RemoveConnections(machines map[string]bool, names ...string) error {
 	return config.EditConnectionConfig(func(cfg *config.ConnectionsFile) error {
 		for _, name := range names {
 			if _, ok := cfg.Connection.Connections[name]; ok {
@@ -98,22 +98,30 @@ func RemoveConnections(names ...string) error {
 				cfg.Connection.Default = ""
 			}
 		}
-		for service := range cfg.Connection.Connections {
-			cfg.Connection.Default = service
-			break
+
+		for name, rootful := range machines {
+			rootfulName := fmt.Sprintf("%s-root", name)
+			// we have a system connection matching with a machine
+			if name == cfg.Connection.Default || rootfulName == cfg.Connection.Default {
+				// the rootfullness of the machine doesn't match the rootfulness of the system connection
+				if (rootful && name != rootfulName) || (!rootful && name == rootfulName) {
+					return UpdateConnectionIfDefault(rootful, name, fmt.Sprintf("%s-root", name))
+				}
+			}
 		}
+
 		return nil
 	})
 }
 
 // removeFilesAndConnections removes any files and connections with the given names
-func RemoveFilesAndConnections(files []string, names ...string) {
+func RemoveFilesAndConnections(machines map[string]bool, files []string, names ...string) {
 	for _, f := range files {
 		if err := os.Remove(f); err != nil && !errors.Is(err, os.ErrNotExist) {
 			logrus.Error(err)
 		}
 	}
-	if err := RemoveConnections(names...); err != nil {
+	if err := RemoveConnections(machines, names...); err != nil {
 		logrus.Error(err)
 	}
 }

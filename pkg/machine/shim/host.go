@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/containers/podman/v5/pkg/machine/env"
 	"github.com/containers/podman/v5/pkg/machine/ignition"
 	"github.com/containers/podman/v5/pkg/machine/lock"
+	"github.com/containers/podman/v5/pkg/machine/provider"
 	"github.com/containers/podman/v5/pkg/machine/proxyenv"
 	"github.com/containers/podman/v5/pkg/machine/vmconfigs"
 	"github.com/containers/podman/v5/utils"
@@ -228,7 +230,11 @@ func Init(opts machineDefine.InitOptions, mp vmconfigs.VMProvider) error {
 	}
 
 	cleanup := func() error {
-		return connection.RemoveConnections(mc.Name, mc.Name+"-root")
+		machines, err := GetAllMachineNamesAndRootfulness()
+		if err != nil {
+			return err
+		}
+		return connection.RemoveConnections(machines, mc.Name, mc.Name+"-root")
 	}
 	callbackFuncs.Add(cleanup)
 
@@ -670,4 +676,59 @@ func Reset(dirs *machineDefine.MachineDirs, mp vmconfigs.VMProvider, mcs map[str
 	confDirErr := utils.GuardedRemoveAll(filepath.Dir(dirs.ConfigDir.GetPath()))
 	resetErrors = multierror.Append(resetErrors, confDirErr, dataDirErr)
 	return resetErrors.ErrorOrNil()
+}
+
+func GetAllMachines() (map[string]*vmconfigs.MachineConfig, error) {
+	supportedProviders := provider.SupportedProviders()
+	installedProviders, err := provider.InstalledProviders()
+	if err != nil {
+		return nil, err
+	}
+
+	// determine which of the supported providers are also installed
+	providers := []machineDefine.VMType{}
+	for _, p := range supportedProviders {
+		if slices.Contains(installedProviders, p) {
+			providers = append(providers, p)
+		}
+	}
+
+	// check to see if we have the permissions to use all of the installed and supported providers
+	providersWithPermissions := []machineDefine.VMType{}
+	for _, p := range providers {
+		if provider.HasPermsForProvider(p) {
+			providersWithPermissions = append(providersWithPermissions, p)
+		}
+	}
+
+	// iterate through all valid providers and compose a list of all the machines on the host
+	machines := map[string]*vmconfigs.MachineConfig{}
+	for _, p := range providersWithPermissions {
+		dirs, err := env.GetMachineDirs(p)
+		if err != nil {
+			return nil, err
+		}
+		providerMachines, err := vmconfigs.LoadMachinesInDir(dirs)
+		if err != nil {
+			return nil, err
+		}
+
+		for n, m := range providerMachines {
+			machines[n] = m
+		}
+	}
+	return machines, nil
+}
+
+func GetAllMachineNamesAndRootfulness() (map[string]bool, error) {
+	machines, err := GetAllMachines()
+	if err != nil {
+		return nil, err
+	}
+
+	names := map[string]bool{}
+	for n, mc := range machines {
+		names[n] = mc.HostUser.Rootful
+	}
+	return names, nil
 }

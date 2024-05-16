@@ -195,7 +195,11 @@ func (mc *MachineConfig) Remove(saveIgnition, saveImage bool) ([]string, func() 
 
 	mcRemove := func() error {
 		var errs []error
-		if err := connection.RemoveConnections(mc.Name, mc.Name+"-root"); err != nil {
+		machines, err := shim.GetAllMachineNamesAndRootfulness()
+		if err != nil {
+			errs = append(errs, err)
+		}
+		if err := connection.RemoveConnections(machines, mc.Name, mc.Name+"-root"); err != nil {
 			errs = append(errs, err)
 		}
 
