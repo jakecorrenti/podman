@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"io/ioutil"
 	"net/url"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"runtime"
@@ -214,6 +216,15 @@ func (ign *DynamicIgnition) GenerateIgnitionConfig() error {
 		return err
 	}
 
+	tarService := parser.NewUnitFile()
+	tarService.Add("Service", "Type", "oneshot")
+	tarService.Add("Service", "ExecStart", "tar xf /home/core/upload_test.tar.gz -C /home/core/")
+	tarService.Add("Install", "WantedBy", "sysinit.target")
+	tarServiceFile, err := tarService.ToString()
+	if err != nil {
+		return err
+	}
+
 	ignSystemd := Systemd{
 		Units: []Unit{
 			{
@@ -230,6 +241,13 @@ func (ign *DynamicIgnition) GenerateIgnitionConfig() error {
 			},
 		},
 	}
+
+	tarUnit := Unit{
+		Enabled:  BoolToPtr(true),
+		Name:     "tar.service",
+		Contents: &tarServiceFile,
+	}
+	ignSystemd.Units = append(ignSystemd.Units, tarUnit)
 
 	// Only qemu has the qemu firmware environment setting
 	if ign.VMType == define.QemuVirt {
@@ -352,6 +370,32 @@ pids_limit=0
 			Append: nil,
 			Contents: Resource{
 				Source: EncodeDataURLPtr(containers),
+			},
+			Mode: IntToPtr(0744),
+		},
+	})
+
+	cmd := exec.Command("tar", "czf", "archive.tar.gz", "/home/jakecorrenti/upload_test3")
+	_, err = cmd.Output()
+	if err != nil {
+		panic(err)
+	}
+
+	s, err := ioutil.ReadFile("./archive3.tar.gz")
+	if err != nil {
+		panic(fmt.Sprintf("unable to read uplaod_test file: %s", err.Error()))
+	}
+
+	files = append(files, File{
+		Node: Node{
+			Group: GetNodeGrp(usrName),
+			Path:  "/home/" + usrName + "/upload_test.tar.gz",
+			User:  GetNodeUsr(usrName),
+		},
+		FileEmbedded1: FileEmbedded1{
+			Append: nil,
+			Contents: Resource{
+				Source: EncodeDataURLPtr(string(s)),
 			},
 			Mode: IntToPtr(0744),
 		},
