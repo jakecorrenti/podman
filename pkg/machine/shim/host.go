@@ -16,6 +16,7 @@ import (
 	"github.com/containers/podman/v5/pkg/machine/env"
 	"github.com/containers/podman/v5/pkg/machine/ignition"
 	"github.com/containers/podman/v5/pkg/machine/lock"
+	"github.com/containers/podman/v5/pkg/machine/provider"
 	"github.com/containers/podman/v5/pkg/machine/proxyenv"
 	"github.com/containers/podman/v5/pkg/machine/vmconfigs"
 	"github.com/containers/podman/v5/utils"
@@ -229,8 +230,12 @@ func Init(opts machineDefine.InitOptions, mp vmconfigs.VMProvider) error {
 		return err
 	}
 
+	machines, err := provider.GetAllMachinesAndRootfulness()
+	if err != nil {
+		return err
+	}
 	cleanup := func() error {
-		return connection.RemoveConnections(mc.Name, mc.Name+"-root")
+		return connection.RemoveConnections(machines, mc.Name, mc.Name+"-root")
 	}
 	callbackFuncs.Add(cleanup)
 
@@ -580,7 +585,11 @@ func Remove(mc *vmconfigs.MachineConfig, mp vmconfigs.VMProvider, dirs *machineD
 		}
 	}
 
-	rmFiles, genericRm, err := mc.Remove(opts.SaveIgnition, opts.SaveImage)
+	machines, err := provider.GetAllMachinesAndRootfulness()
+	if err != nil {
+		return err
+	}
+	rmFiles, genericRm, err := mc.Remove(machines, opts.SaveIgnition, opts.SaveImage)
 	if err != nil {
 		return err
 	}
@@ -642,6 +651,11 @@ func Reset(mps []vmconfigs.VMProvider, opts machine.ResetOptions) error {
 	var resetErrors *multierror.Error
 	removeDirs := []*machineDefine.MachineDirs{}
 
+	machines, err := provider.GetAllMachinesAndRootfulness()
+	if err != nil {
+		return err
+	}
+
 	for _, p := range mps {
 		d, err := env.GetMachineDirs(p.VMType())
 		if err != nil {
@@ -660,7 +674,7 @@ func Reset(mps []vmconfigs.VMProvider, opts machine.ResetOptions) error {
 			if err != nil {
 				resetErrors = multierror.Append(resetErrors, err)
 			}
-			_, genericRm, err := mc.Remove(false, false)
+			_, genericRm, err := mc.Remove(machines, false, false)
 			if err != nil {
 				resetErrors = multierror.Append(resetErrors, err)
 			}

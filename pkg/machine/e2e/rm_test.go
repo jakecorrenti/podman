@@ -43,6 +43,49 @@ var _ = Describe("podman machine rm", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(removeSession2).To(Exit(125))
 		Expect(removeSession2.errorToString()).To(ContainSubstring(fmt.Sprintf("%s: VM does not exist", name)))
+
+		// Ensure that the system connections have the right rootfulness
+		name = randomString()
+		i = new(initMachine)
+		session, err = mb.setName(name).setCmd(i.withImage(mb.imagePath)).run()
+		Expect(err).ToNot(HaveOccurred())
+		Expect(session).To(Exit(0))
+
+		name2 := randomString()
+		i = new(initMachine)
+		session, err = mb.setName(name2).setCmd(i.withImage(mb.imagePath).withRootful(true)).run()
+		Expect(err).ToNot(HaveOccurred())
+		Expect(session).To(Exit(0))
+
+		bm := basicMachine{}
+		sysConnOutput, err := mb.setCmd(bm.withPodmanCommand([]string{"system", "connection", "list", "--format", "'{{.Name}}'"})).run()
+		Expect(err).ToNot(HaveOccurred())
+		names := sysConnOutput.outputToStringSlice()
+		sysConnOutput, err = mb.setCmd(bm.withPodmanCommand([]string{"system", "connection", "list", "--format", "'{{.Default}}'"})).run()
+		Expect(err).ToNot(HaveOccurred())
+		defaults := sysConnOutput.outputToStringSlice()
+		for idx, n := range names {
+			if n == name {
+				Expect(defaults[idx]).To(Equal("true"))
+			}
+		}
+
+		rm = rmMachine{}
+		removeSession, err = mb.setName(name).setCmd(rm.withForce()).run()
+		Expect(err).ToNot(HaveOccurred())
+		Expect(removeSession).To(Exit(0))
+
+		sysConnOutput, err = mb.setCmd(bm.withPodmanCommand([]string{"system", "connection", "list", "--format", "'{{.Name}}'"})).run()
+		Expect(err).ToNot(HaveOccurred())
+		names = sysConnOutput.outputToStringSlice()
+		sysConnOutput, err = mb.setCmd(bm.withPodmanCommand([]string{"system", "connection", "list", "--format", "'{{.Default}}'"})).run()
+		Expect(err).ToNot(HaveOccurred())
+		defaults = sysConnOutput.outputToStringSlice()
+		for idx, n := range names {
+			if n == name2+"-root" {
+				Expect(defaults[idx]).To(Equal("true"))
+			}
+		}
 	})
 
 	It("Remove running machine", func() {

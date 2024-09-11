@@ -7,10 +7,8 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"os"
 
 	"github.com/containers/common/pkg/config"
-	"github.com/sirupsen/logrus"
 )
 
 const LocalhostIP = "127.0.0.1"
@@ -85,37 +83,51 @@ func UpdateConnectionIfDefault(rootful bool, name, rootfulName string) error {
 	})
 }
 
-func RemoveConnections(names ...string) error {
-	return config.EditConnectionConfig(func(cfg *config.ConnectionsFile) error {
-		for _, name := range names {
-			if _, ok := cfg.Connection.Connections[name]; ok {
-				delete(cfg.Connection.Connections, name)
-			} else {
-				return fmt.Errorf("unable to find connection named %q", name)
-			}
+func RemoveConnections(machines map[string]bool, names ...string) error {
+	var dest config.Destination
+	var service string
 
-			if cfg.Connection.Default == name {
-				cfg.Connection.Default = ""
-			}
-		}
-		for service := range cfg.Connection.Connections {
-			cfg.Connection.Default = service
-			break
-		}
-		return nil
-	})
+	if err := config.EditConnectionConfig(func(cfg *config.ConnectionsFile) error {
+		return setNewDefaultConnection(cfg, &dest, &service, names...)
+	}); err != nil {
+		return err
+	}
+
+	rootful, ok := machines[service]
+	if dest.IsMachine && ok {
+		return UpdateConnectionIfDefault(rootful, service, service+"-root")
+	}
+
+	return nil
 }
 
-// removeFilesAndConnections removes any files and connections with the given names
-func RemoveFilesAndConnections(files []string, names ...string) {
-	for _, f := range files {
-		if err := os.Remove(f); err != nil && !errors.Is(err, os.ErrNotExist) {
-			logrus.Error(err)
+// setNewDefaultConnection iterates through the list of system connections and sets the new default as the very first one
+func setNewDefaultConnection(cfg *config.ConnectionsFile, dest *config.Destination, service *string, names ...string) error {
+	// delete the connection associated with the names and if that connection is
+	// the default, reset the default connection
+	for _, name := range names {
+		if _, ok := cfg.Connection.Connections[name]; ok {
+			delete(cfg.Connection.Connections, name)
+		} else {
+			return fmt.Errorf("unable to find connection named %q", name)
+		}
+
+		if cfg.Connection.Default == name {
+			cfg.Connection.Default = ""
 		}
 	}
-	if err := RemoveConnections(names...); err != nil {
-		logrus.Error(err)
+
+	// set the new default system connection to the first in the map
+	for con := range cfg.Connection.Connections {
+		cfg.Connection.Default = con
+		if c, ok := cfg.Connection.Connections[con]; ok {
+			*dest = c
+			*service = con
+		}
+		break
 	}
+
+	return nil
 }
 
 // makeSSHURL creates a URL from the given input
