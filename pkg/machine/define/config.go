@@ -21,6 +21,7 @@ type CreateVMOpts struct {
 	Dirs               *MachineDirs
 	ReExec             bool
 	UserModeNetworking bool
+	Playbook           *PlaybookConfig
 }
 
 type MachineDirs struct {
@@ -28,4 +29,9 @@ type MachineDirs struct {
 	DataDir       *VMFile
 	ImageCacheDir *VMFile
 	RuntimeDir    *VMFile
+}
+
+type PlaybookConfig struct {
+	Dest     string
+	Contents string
 }

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -204,6 +205,32 @@ func Init(opts machineDefine.InitOptions, mp vmconfigs.VMProvider) error {
 		err = ignBuilder.GenerateIgnitionConfig()
 		if err != nil {
 			return err
+		}
+	}
+
+	if len(opts.PlaybookPath) > 0 {
+		f, err := os.Open(opts.PlaybookPath)
+		if err != nil {
+			return err
+		}
+
+		playbookDest := fmt.Sprintf("/home/%s/%s", userName, "playbook.yaml")
+
+		if mp.VMType() == machineDefine.WSLVirt {
+			s, err := io.ReadAll(f)
+			if err != nil {
+				return fmt.Errorf("read playbook: %w", err)
+			}
+
+			createOpts.Playbook = &machineDefine.PlaybookConfig{
+				Dest:     playbookDest,
+				Contents: string(s),
+			}
+		} else {
+			err = ignBuilder.AddPlaybook(f, playbookDest, userName)
+			if err != nil {
+				return err
+			}
 		}
 	}
 

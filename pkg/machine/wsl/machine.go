@@ -148,7 +148,7 @@ func createKeys(mc *vmconfigs.MachineConfig, dist string) error {
 	return nil
 }
 
-func configureSystem(mc *vmconfigs.MachineConfig, dist string) error {
+func configureSystem(mc *vmconfigs.MachineConfig, dist string, playbookConfig *define.PlaybookConfig) error {
 	user := mc.SSH.RemoteUsername
 	if err := wslInvoke(dist, "sh", "-c", fmt.Sprintf(appendPort, mc.SSH.Port, mc.SSH.Port)); err != nil {
 		return fmt.Errorf("could not configure SSH port for guest OS: %w", err)
@@ -165,6 +165,12 @@ func configureSystem(mc *vmconfigs.MachineConfig, dist string) error {
 	if err := wslPipe(overrideSysusers, dist, "sh", "-c",
 		"cat > /etc/systemd/system/systemd-sysusers.service.d/override.conf"); err != nil {
 		return fmt.Errorf("could not generate systemd-sysusers override for guest OS: %w", err)
+	}
+
+	if playbookConfig != nil {
+		if err := wslPipe(playbookConfig.Contents, dist, "sh", "-c", fmt.Sprintf("cat > %s", playbookConfig.Dest)); err != nil {
+			return fmt.Errorf("could not generate playbook file for guest os: %w", err)
+		}
 	}
 
 	lingerCmd := withUser("cat > /home/[USER]/.config/systemd/[USER]/linger-example.service", user)
