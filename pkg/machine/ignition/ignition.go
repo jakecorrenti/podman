@@ -685,6 +685,56 @@ done
 `
 }
 
+func (i *IgnitionBuilder) AddPlaybook(input *os.File, destPath string, username string) error {
+	// read the config file to a string
+	s, err := os.ReadFile(input.Name())
+	if err != nil {
+		return err
+	}
+
+	// create the ignition file object
+	f := File{
+		Node: Node{
+			Group: GetNodeGrp(username),
+			Path:  destPath,
+			User:  GetNodeUsr(username),
+		},
+		FileEmbedded1: FileEmbedded1{
+			Append: nil,
+			Contents: Resource{
+				Source: EncodeDataURLPtr(string(s)),
+			},
+			Mode: IntToPtr(0744),
+		},
+	}
+
+	// call ignitionBuilder.WithFile
+	// add the config file to the ignition object
+	i.WithFile(f)
+
+	unit := parser.NewUnitFile()
+	unit.Add("Unit", "After", "ready.service")
+	unit.Add("Service", "Type", "oneshot")
+	unit.Add("Service", "User", *GetNodeUsr(username).Name)
+	unit.Add("Service", "Group", *GetNodeGrp(username).Name)
+	unit.Add("Service", "ExecStart", fmt.Sprintf("ansible-playbook %s", destPath))
+	unit.Add("Install", "WantedBy", "default.target")
+	unitContents, err := unit.ToString()
+	if err != nil {
+		return err
+	}
+
+	// create a systemd service
+	playbookUnit := Unit{
+		Enabled:  BoolToPtr(true),
+		Name:     "playbook.service",
+		Contents: &unitContents,
+	}
+	i.WithUnit(playbookUnit)
+
+	return nil
+}
+
 func GetNetRecoveryUnitFile() *parser.UnitFile {
 	recoveryUnit := parser.NewUnitFile()
 	recoveryUnit.Add("Unit", "Description", "Verifies health of network and recovers if necessary")

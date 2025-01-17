@@ -207,6 +207,19 @@ func Init(opts machineDefine.InitOptions, mp vmconfigs.VMProvider) error {
 		}
 	}
 
+	if len(opts.PlaybookPath) > 0 {
+		f, err := os.Open(opts.PlaybookPath)
+		if err != nil {
+			return err
+		}
+
+		playbookDest := fmt.Sprintf("/home/%s/%s", userName, "playbook")
+		err = ignBuilder.AddPlaybook(f, playbookDest, userName)
+		if err != nil {
+			return err
+		}
+	}
+
 	readyIgnOpts, err := mp.PrepareIgnition(mc, &ignBuilder)
 	if err != nil {
 		return err
