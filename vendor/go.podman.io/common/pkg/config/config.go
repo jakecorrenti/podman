@@ -420,6 +420,8 @@ type EngineConfig struct {
 	// OCIRuntime is the OCI runtime to use.
 	OCIRuntime string `toml:"runtime,omitempty"`
 
+	LibkrunEnclaveType string `toml:"enclave_type,omitempty"`
+
 	// OCIRuntimes are the set of configured OCI runtimes (default is runc).
 	OCIRuntimes map[string][]string `toml:"runtimes,omitempty"`
 

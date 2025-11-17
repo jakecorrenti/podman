@@ -257,6 +257,21 @@ func CreateInit(c *cobra.Command, vals entities.ContainerCreateOptions, isInfra 
 		}
 	}
 
+	if c.Flag("enclave").Changed {
+		vals.Annotation = append(vals.Annotation, fmt.Sprintf("krun.variant=%s", c.Flag("enclave").Value.String()))
+
+		if c.Flag("cpus").Changed {
+			cpus := c.Flag("cpus").Value.String()
+			vals.Annotation = append(vals.Annotation, fmt.Sprintf("krun.cpus=%s", cpus))
+		}
+
+		if c.Flag("memory").Changed {
+			memoryMib := c.Flag("memory").Value.String()
+			vals.Annotation = append(vals.Annotation, fmt.Sprintf("krun.memory_mib=%s", memoryMib))
+		}
+
+	}
+
 	if !isInfra {
 		if c.Flag("cpu-period").Changed && c.Flag("cpus").Changed {
 			return vals, errors.New("--cpu-period and --cpus cannot be set together")

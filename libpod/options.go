@@ -151,6 +151,42 @@ func WithOCIRuntime(runtime string) RuntimeOption {
 	}
 }
 
+// WithEnclave specifies an enclave type for the krun runtime.
+func WithEnclave(enclaveType string) RuntimeOption {
+	return func(rt *Runtime) error {
+		if rt.valid {
+			return define.ErrRuntimeFinalized
+		}
+
+		if enclaveType == "" {
+			return fmt.Errorf("must provide a valid enclave type: %w", define.ErrInvalidArg)
+		}
+
+		cfg, err := config.Default()
+		if err != nil {
+			return fmt.Errorf("unable to verify krun path: %w", err)
+		}
+
+		krunPath, err := cfg.FindHelperBinary("krun", true)
+		if err != nil {
+			return fmt.Errorf("unable to find krun binary: %w", err)
+		}
+
+		krunPath = "/usr/local/bin/krun"
+
+		rt.config.Engine.OCIRuntime = krunPath
+		rt.config.Engine.LibkrunEnclaveType = enclaveType
+		fmt.Println("krun path: ", krunPath)
+
+		// TODO(jakecorrenti): do we set the annotations here at least for the
+		// krun flavor? We'll definitely need to wait until further in the
+		// creation sequence before we're able to know what the resource
+		// configuration is and how to add that to the annotations.
+
+		return nil
+	}
+}
+
 // WithCtrOCIRuntime specifies an OCI runtime in container's config.
 func WithCtrOCIRuntime(runtime string) CtrCreateOption {
 	return func(ctr *Container) error {

@@ -159,6 +159,10 @@ func getRuntime(ctx context.Context, fs *flag.FlagSet, opts *engineOpts) (*libpo
 		options = append(options, libpod.WithOCIRuntime(cfg.RuntimePath))
 	}
 
+	if fs.Changed("enclave") {
+		options = append(options, libpod.WithEnclave(cfg.EnclaveType))
+	}
+
 	if fs.Changed("conmon") {
 		options = append(options, libpod.WithConmonPath(cfg.ConmonPath))
 	}

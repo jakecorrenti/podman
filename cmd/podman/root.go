@@ -634,9 +634,15 @@ func rootFlags(cmd *cobra.Command, podmanConfig *entities.PodmanConfig) {
 
 		pFlags.StringArrayVar(&podmanConfig.PullOptions, "pull-option", nil, "Specify an option to change how the image is pulled")
 
+		fmt.Println("This is where the runtime flag is added")
+
 		runtimeFlagName := "runtime"
 		pFlags.StringVar(&podmanConfig.RuntimePath, runtimeFlagName, podmanConfig.ContainersConfDefaultsRO.Engine.OCIRuntime, "Path to the OCI-compatible binary used to run containers.")
 		_ = cmd.RegisterFlagCompletionFunc(runtimeFlagName, completion.AutocompleteDefault)
+
+		enclaveFlagName := "enclave"
+		pFlags.StringVar(&podmanConfig.EnclaveType, enclaveFlagName, podmanConfig.ContainersConfDefaultsRO.Engine.LibkrunEnclaveType, "Enclave TEE architecture")
+		_ = cmd.RegisterFlagCompletionFunc(enclaveFlagName, completion.AutocompleteDefault)
 
 		// -s is deprecated due to conflict with -s on subcommands
 		storageDriverFlagName := "storage-driver"

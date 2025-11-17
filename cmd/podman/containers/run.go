@@ -126,7 +126,6 @@ func run(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
-
 	runOpts.CIDFile = cliVals.CIDFile
 	runOpts.Rm = cliVals.Rm
 	cliVals, err := CreateInit(cmd, cliVals, false)
